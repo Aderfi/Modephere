@@ -1,0 +1,119 @@
+[project]
+name = "modephere"
+version = "0.1.0"
+description = "Molecule and 2D/3D pharmacophore representations from SMILES, PubChem CIDs or drug names."
+readme = "README.md"
+requires-python = ">=3.14,<3.15"
+dependencies = [
+    "pydantic>=2.12.5",
+    "numpy>=2.4",
+    "polars>=1.39",  # tabular data: never pandas
+    "rdkit==2025.9.6",
+    "pydantic-settings>=2.14",
+    "httpx>=0.28.1",
+    "safetensors>=0.8",
+    "tqdm>=4.67",
+]
+
+[project.optional-dependencies]
+# torch / PyG are only needed by modephere.types.tensors and (later) featurize/.
+ml = [
+    "torch==2.12.1",
+    "torch-geometric>=2.8.1,<2.9",
+    "pyg_lib==0.7.0",
+]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=6.0.0",
+    "ruff>=0.14.0",
+    "mypy>=1.18.0",
+]
+std = [
+    "chembl-structure-pipeline>=1.2.4",
+]
+# Neo4j knowledge graph (modephere.kg); the ChEMBL ETL itself needs only polars.
+kg = [
+    "neo4j>=6.0",
+]
+
+[project.scripts]
+modephere = "modephere:main"
+
+[build-system]
+requires = ["uv_build>=0.13.6,<0.14.0"]
+build-backend = "uv_build"
+
+# =============================================================================
+# UV CONFIGURATION (same indexes as dev_Pgen)
+# =============================================================================
+[[tool.uv.index]]
+name = "pytorch-cu132"
+url = "https://download.pytorch.org/whl/cu132"
+explicit = true
+
+[[tool.uv.index]]
+name = "pyg"
+url = "https://data.pyg.org/whl/torch-2.12.0+cu132.html"
+format = "flat"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu132" }
+pyg_lib = { index = "pyg" }
+
+# =============================================================================
+# PYTEST
+# =============================================================================
+# Ruff is configured in ruff.toml (single source of truth), not here.
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "--strict-markers",
+    "--strict-config",
+    "--cov=modephere",
+    "--cov-report=term-missing",
+]
+filterwarnings = [
+    # torch_geometric/inspector.py on Python 3.14 (upstream; not Modephere code)
+    "ignore:Failing to pass a value to the 'type_params' parameter:DeprecationWarning",
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "network: marks tests that reach a live upstream service",
+]
+
+# =============================================================================
+# MYPY
+# =============================================================================
+[tool.mypy]
+python_version = "3.14"
+plugins = ["pydantic.mypy"]
+warn_return_any = true
+warn_unused_configs = true
+check_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+strict_equality = true
+ignore_missing_imports = true
+
+# =============================================================================
+# COVERAGE
+# =============================================================================
+[tool.coverage.run]
+source = ["modephere"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]

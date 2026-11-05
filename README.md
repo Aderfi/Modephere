@@ -1,0 +1,126 @@
+# Modephere
+
+Molecule and 2D/3D pharmacophore representations from **SMILES, PubChem CIDs or
+drug names**, stored as a resumable library and ready for PyTorch Geometric.
+
+For every compound it builds:
+
+| Output | Shape / layout |
+|---|---|
+| Molecular graph (working form) | `molecule/v1`: 61 node, 18 edge, 1038 global features (identical to dev_Pgen) |
+| Pharmacophore graph (pH 7.4) | `pharmacophore/v1`: 11 node, 13 edge, 258 global features (identical to dev_Pgen) |
+| Conformer ensemble | ETKDGv3 + MMFF94s (UFF fallback), stereoisomers enumerated, energy window, RMSD pruning |
+| 3D pharmacophore per conformer | feature centroids + H-bond / ring-normal directions |
+| Fingerprints | Gobbi 2D pharmacophore (39 972 bits), 3D feature triplets (4 096 bits) |
+
+Design decisions and their reasons are in [`PLAN.md`](PLAN.md).
+
+## Install
+
+```bash
+uv sync --extra dev            # chemistry + storage
+uv sync --extra ml --extra dev # + torch / PyG featurization (CUDA 13.2 wheels)
+uv sync --all-extras           # + ChEMBL salt-list standardizer
+```
+
+## Command line
+
+```bash
+# 1. the only networked step: resolve names / CIDs on PubChem into the raw cache
+modephere fetch --catalog drugs.tsv
+# 2. build offline from the cache (resumable; --force rebuilds)
+modephere build --catalog drugs.tsv
+# without a catalog, straight from PubChem, 2D only
+modephere build --name ibuprofen --cid 2244 --smiles "CN1C=NC2=C1C(=O)N(C(=O)N2C)C" --online --2d-only
+# conformers of one compound as SDF
+modephere export-sdf BSYNRYMUTXBXSQ-UHFFFAOYSA-N aspirin.sdf
+```
+
+Catalogs: `.tsv` / `.csv` / `.txt` / `.parquet` with `kind,value[,label]` columns,
+or any of `smiles` / `cid` / `name` columns (dev_Pgen's `cid, smiles,
+cmpd_name_cleaned` works as is); `.json` as a list of queries or `{cid: smiles}`.
+Exit status is 2 when a compound failed; see `failures.parquet` and
+`logs/library/build_failures_<date>.log`.
+
+Paths and PubChem etiquette come from `src/modephere/config/data/*.toml`,
+overridable with `MODEPHERE_*` variables (e.g. `MODEPHERE_PATHS__LIBRARY=/scratch/lib`).
+
+## Python
+
+```python
+from modephere.library import build_compound, LibraryStore
+
+art = build_compound("CC(=O)Oc1ccccc1C(=O)O")  # one compound, nothing on disk
+art.molecule.x.shape  # (13, 61)
+[f.family for f in art.pharmacophore_2d.features]
+art.conformers.num_conformers, art.pharmacophores_3d[0].points[0].direction
+
+from modephere.featurize import LibraryDataset  # needs the ml extra
+from torch_geometric.loader import DataLoader
+
+ds = LibraryDataset("data/library", kind="hetero", conformer="sample", targets=labels)
+for batch in DataLoader(ds, batch_size=32, shuffle=True):
+    ...  # batch["atom"].z / .pos for SchNet / ViSNet, batch["pharm"], member_of edges
+```
+
+`targets` is a polars frame with an `inchikey` column; the other columns become `y`.
+
+## ChEMBL and the knowledge graph
+
+ChEMBL (CC BY-SA 3.0) supplies drug annotations and bioactivity labels from a local
+SQLite release; Neo4j holds them as a graph. Raw activities stay in Parquet.
+
+```bash
+uv sync --all-extras                                  # includes the neo4j driver (kg extra)
+uv run python -m modephere.chembl extract             # chembl_<N>.db -> data/chembl/chembl_<N>/
+docker compose -f docker-compose.kg.yml up -d         # Neo4j on bolt://localhost:7688
+uv run python -m modephere.kg load-chembl             # idempotent MERGE, ~25 s for the drug set
+uv run python -m modephere.kg audit                   # provenance check
+uv run python -m modephere.kg search gleevec
+uv run python -m modephere.kg link-library            # built compounds -[:REPRESENTS]-> ChEMBL
+uv run python -m modephere.kg link-drugs --drugs-uri bolt://localhost:7687  # dev_Pgen drugs
+```
+
+With a staged release the library builder resolves names through ChEMBL first (offline;
+a salt name maps to its parent; PubChem only for names ChEMBL lacks), accepts ChEMBL IDs
+(`--chembl-id`, or a `chembl_id` catalog column) and records each compound's ChEMBL parent
+in the registry (`chembl_id`, `chembl_release`). `--no-chembl` turns this off.
+
+```python
+from pathlib import Path
+
+from modephere.chembl import ChemblLookup, bioactivity_labels
+
+staging = Path("data/chembl/chembl_37")
+ChemblLookup(staging).by_name("gleevec")[0].parent_chembl_id  # 'CHEMBL941' (imatinib)
+# one pChEMBL column per target, keyed by the library's InChIKeys via chembl_id
+labels = bioactivity_labels(staging, ["CHEMBL1862"], library=Path("data/library"))
+```
+
+The SQLite path is `[chembl] sqlite` in `settings.toml` (`MODEPHERE_CHEMBL__SQLITE`). Graph
+model: `src/modephere/kg/schema.py`; selection and aggregation rules: `PLAN.md` section F.
+
+## Library layout
+
+```
+data/library/
+├── compounds/<InChIKey>.safetensors   every array of one compound (no pickle)
+├── compounds.parquet                  registry (query, source, CID, SMILES forms)
+├── conformers.parquet                 energies, stereoisomer, force field
+├── failures.parquet                   failures of the latest run
+└── build_manifest.json                options + toolkit versions
+data/cache/pubchem/*.jsonl             raw PubChem responses (offline replay)
+data/chembl/chembl_<N>/*.parquet       ChEMBL staging: compounds, synonyms, mechanisms,
+                                       indications, ..., activities (raw), bioactivity
+```
+
+## Development
+
+```bash
+uv run ruff check . && uv run ruff format --check . && uv run mypy src tests
+uv run pytest
+```
+
+`tests/unit/library/test_parity.py` checks byte-identical 2D graphs against
+dev_Pgen golden data (`scripts/make_parity_fixtures.py` regenerates it with
+dev_Pgen's interpreter). RDKit is pinned to dev_Pgen's version for that reason.
