@@ -190,13 +190,23 @@ class PubChemClient:
 
     def name_to_cids(self, name: str) -> Lookup[tuple[int, ...]]:
         """CIDs PubChem matches to ``name``, in PubChem's order."""
-        key = NameQuery(name=name).key
+        return self._identifier_cids(NameQuery(name=name).key, "name", name)
+
+    def inchikey_to_cids(self, inchikey: str) -> Lookup[tuple[int, ...]]:
+        """CIDs whose standard InChIKey is ``inchikey`` (usually exactly one)."""
+        inchikey = inchikey.strip().upper()
+        return self._identifier_cids(f"inchikey:{inchikey}", "inchikey", inchikey)
+
+    def _identifier_cids(
+        self, key: str, namespace: str, value: str
+    ) -> Lookup[tuple[int, ...]]:
+        """``/compound/<namespace>/cids`` through the cache (names cache file)."""
         entry = self.names.get(key)
         if entry is None:
             if self._offline:
                 return Lookup("missing", message=f"{key} not cached")
             try:
-                entry = self._fetch_name(key, name)
+                entry = self._fetch_cids(key, namespace, value)
             except httpx.HTTPError as e:
                 return Lookup("error", message=str(e))
             self.names.put(entry)
@@ -207,11 +217,11 @@ class PubChemClient:
             return Lookup("not_found", retrieved_at=entry.retrieved_at)
         return Lookup("ok", cids, entry.retrieved_at)
 
-    def _fetch_name(self, key: str, name: str) -> CacheEntry:
-        path = "/compound/name/cids/JSON"
-        response = self._post(path, {"name": name})
+    def _fetch_cids(self, key: str, namespace: str, value: str) -> CacheEntry:
+        path = f"/compound/{namespace}/cids/JSON"
+        response = self._post(path, {namespace: value})
         now = datetime.now(tz=UTC)
-        request = f"POST {path} name={name}"
+        request = f"POST {path} {namespace}={value}"
         if response.status_code == httpx.codes.NOT_FOUND:
             return CacheEntry(
                 key=key, request=request, status="not_found", retrieved_at=now

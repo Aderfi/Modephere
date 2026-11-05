@@ -90,6 +90,32 @@ class TestPubChemClient:
         offline = make_client(tmp_path, pubchem_settings, offline=True)
         assert offline.name_to_cids("unobtainium").status == "not_found"
 
+    def test_inchikey_lookup_is_cached(
+        self,
+        tmp_path: Path,
+        pubchem_settings: PubChemSettings,
+        fake_pubchem: FakePubChem,
+    ) -> None:
+        client = make_client(tmp_path, pubchem_settings, fake_pubchem)
+        assert client.inchikey_to_cids(ASPIRIN_KEY).value == (2244,)
+        assert client.inchikey_to_cids(ASPIRIN_KEY.lower()).value == (2244,)
+        assert len(fake_pubchem.requests) == 1
+        offline = make_client(tmp_path, pubchem_settings, offline=True)
+        assert offline.inchikey_to_cids(ASPIRIN_KEY).value == (2244,)
+
+    def test_unknown_inchikey_is_cached_not_found(
+        self,
+        tmp_path: Path,
+        pubchem_settings: PubChemSettings,
+        fake_pubchem: FakePubChem,
+    ) -> None:
+        unknown = "AAAAAAAAAAAAAA-BBBBBBBBSA-N"
+        client = make_client(tmp_path, pubchem_settings, fake_pubchem)
+        assert client.inchikey_to_cids(unknown).status == "not_found"
+        offline = make_client(tmp_path, pubchem_settings, offline=True)
+        assert offline.inchikey_to_cids(unknown).status == "not_found"
+        assert offline.inchikey_to_cids(ASPIRIN_KEY).status == "missing"
+
     def test_properties_batched_and_per_cid_cached(
         self,
         tmp_path: Path,

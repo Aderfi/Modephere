@@ -134,6 +134,34 @@ def _embed(mol_h: Chem.Mol, params: ConformerParams, count: int) -> list[int]:
     return ids
 
 
+#: Elements whose only UFF type (Rappe et al. 1992) is sp3: Se3+2, Te3+2.
+#: RDKit's UFF typer derives the type from the hybridization, so selenium in a
+#: conjugated ring (ebselen, selenophenes) asks for "Se2+2", which UFF lacks,
+#: and the molecule cannot be parametrized at all.
+_UFF_SP3_ONLY = frozenset({34, 52})
+
+
+def _uff_view(mol_h: Chem.Mol) -> Chem.Mol:
+    """``mol_h``, or a copy typed for UFF: sp3-only elements retyped as sp3.
+
+    Only the force field sees the copy; the bonded geometry still comes from the
+    ring and its sp2 neighbours (ebselen: C-Se-N 86 degrees, planar ring).
+    UFF bonds to Se in such rings come out ~0.07 A short (aromatic bond order).
+    """
+    retype = [
+        a.GetIdx()
+        for a in mol_h.GetAtoms()
+        if a.GetAtomicNum() in _UFF_SP3_ONLY
+        and a.GetHybridization() != Chem.HybridizationType.SP3
+    ]
+    if not retype:
+        return mol_h
+    view = Chem.Mol(mol_h)
+    for idx in retype:
+        view.GetAtomWithIdx(idx).SetHybridization(Chem.HybridizationType.SP3)
+    return view
+
+
 def _resolve_force_field(mol_h: Chem.Mol, params: ConformerParams) -> ForceField:
     order = [params.force_field]
     if params.fallback_force_field is not None:
@@ -144,7 +172,7 @@ def _resolve_force_field(mol_h: Chem.Mol, params: ConformerParams) -> ForceField
         if ff in (ForceField.MMFF94, ForceField.MMFF94S):
             if rdForceFieldHelpers.MMFFHasAllMoleculeParams(mol_h):
                 return ff
-        elif rdForceFieldHelpers.UFFHasAllMoleculeParams(mol_h):
+        elif rdForceFieldHelpers.UFFHasAllMoleculeParams(_uff_view(mol_h)):
             return ff
     raise _fail(
         FailureCategory.FORCEFIELD_FAILED,
@@ -158,9 +186,13 @@ def _optimise(
     if ff is ForceField.NONE:
         return [(True, None)] * mol_h.GetNumConformers()
     if ff is ForceField.UFF:
+        view = _uff_view(mol_h)
         results = rdForceFieldHelpers.UFFOptimizeMoleculeConfs(
-            mol_h, numThreads=params.num_threads, maxIters=params.max_iterations
+            view, numThreads=params.num_threads, maxIters=params.max_iterations
         )
+        if view is not mol_h:  # optimised on the retyped copy: copy coordinates back
+            for conf in view.GetConformers():
+                mol_h.GetConformer(conf.GetId()).SetPositions(conf.GetPositions())
     else:
         results = rdForceFieldHelpers.MMFFOptimizeMoleculeConfs(
             mol_h,

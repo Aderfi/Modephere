@@ -448,6 +448,28 @@
     state; the data volume was fine). Recreated from dev_Pgen's docker-compose.kg.yml, data
     volume kept. The system Neo4j service that held 7474/7687 was stopped by the user.
 
+  2026-11-05 — sp2 selenium under UFF (ebselen)
+  - Ebselen and selenophenes failed at the conformer stage ("no parameters in
+    MMFF94s, UFF"). MMFF94 has no Se; UFF has one Se type (Se3+2), but RDKit's
+    UFF typer derives the type from hybridization and asks for "Se2+2" for Se in
+    a conjugated ring. Fix: UFF parametrizes / optimises a copy with Se and Te
+    retyped sp3 (conformers._uff_view); coordinates are copied back, the stored
+    molecule keeps its sp2 perception. Ebselen: C-Se-N 86 deg, planar ring; Se
+    bonds ~0.07 A short (UFF aromatic bond order). ETKDG still logs
+    "UFFTYPER: Unrecognized atom type: Se2+2" (its bounds use UFF); harmless.
+
+  2026-11-05 — inspection scripts + IUPAC atom numbering
+  - scripts/inspect_compound.py (ChEMBL / PubChem / PharmGKB view of one compound),
+    inspect_graph.py (Neo4j schema, one node's neighbourhood), reconstruct_molecule.py
+    (graph -> molecule round trip, pictures, 3D viewer). Not tests: run by hand.
+  - Atom indices everywhere are positions in the working SMILES (dev_Pgen parity);
+    they are not IUPAC locants. The scripts add IUPAC locants by name: PubChem's
+    IUPAC name (by CID, else InChIKey, else name) -> OPSIN 2.9.0 (CML locant
+    labels) -> skeleton match onto our atoms. Parts of the name are recovered by
+    joining bonded atoms while locants stay unique. Needs Java + the OPSIN jar
+    (project root, gitignored); no IUPAC numbering without a PubChem name.
+  - PubChemClient.inchikey_to_cids (same cache file as names, key "inchikey:<key>").
+
   F. ChEMBL knowledge graph
 
   F1. Data flow

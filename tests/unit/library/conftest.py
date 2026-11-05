@@ -78,8 +78,8 @@ class FakePubChem:
         form = dict(urllib.parse.parse_qsl(request.content.decode()))
         path = request.url.path
         not_found = httpx.Response(404, json={"Fault": {"Code": "PUGREST.NotFound"}})
-        if path.endswith("/compound/name/cids/JSON"):
-            cids = NAMES.get(form["name"].strip().casefold())
+        if path.endswith("/cids/JSON"):  # name or InChIKey -> CIDs
+            cids = self._identifier_cids(path, form)
             if not cids:
                 return not_found
             return httpx.Response(
@@ -94,6 +94,17 @@ class FakePubChem:
                 200, json={"PropertyTable": {"Properties": rows}}, headers=headers
             )
         return httpx.Response(400)
+
+    def _identifier_cids(self, path: str, form: dict[str, str]) -> list[int]:
+        if path.endswith("/compound/name/cids/JSON"):
+            return NAMES.get(form["name"].strip().casefold(), [])
+        if path.endswith("/compound/inchikey/cids/JSON"):
+            return [
+                c
+                for c, rec in self.records.items()
+                if rec.get("InChIKey") == form["inchikey"]
+            ]
+        return []
 
 
 @pytest.fixture

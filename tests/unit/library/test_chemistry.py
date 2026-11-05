@@ -207,6 +207,28 @@ class TestConformers:
         e = generate_conformers(self._micro("OB(O)c1ccccc1"), ASPIRIN_KEY).ensemble
         assert e.force_field is ForceField.UFF
 
+    @pytest.mark.parametrize(
+        "smiles",
+        [
+            "O=C1c2ccccc2[Se]N1c1ccccc1",  # ebselen: Se in a conjugated ring
+            "c1cc[se]c1",  # selenophene: aromatic Se
+        ],
+    )
+    def test_sp2_selenium_uses_uff(self, smiles: str) -> None:
+        # UFF has a single selenium type (Se3+2); RDKit would ask for "Se2+2".
+        cset = generate_conformers(self._micro(smiles), ASPIRIN_KEY)
+        e = cset.ensemble
+        assert e.force_field is ForceField.UFF
+        assert all(c.converged for c in e.conformers)
+        se = next(a for a in cset.mol.GetAtoms() if a.GetAtomicNum() == 34)
+        a, b = (n.GetIdx() for n in se.GetNeighbors())
+        pos = e.positions[0]
+        u, v = pos[a] - pos[se.GetIdx()], pos[b] - pos[se.GetIdx()]
+        angle = np.degrees(np.arccos(u @ v / np.linalg.norm(u) / np.linalg.norm(v)))
+        assert 80 < angle < 95  # five-membered ring: ~86 degrees
+        # the returned molecule keeps its own (sp2) perception
+        assert se.GetHybridization() is Chem.HybridizationType.SP2
+
     def test_stereoisomers_enumerated(self) -> None:
         e = generate_conformers(self._micro("CC(O)CC"), ASPIRIN_KEY).ensemble
         assert {c.stereoisomer for c in e.conformers} == {0, 1}

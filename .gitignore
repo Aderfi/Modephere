@@ -50,6 +50,9 @@ wandb/
 Thumbs.db
 *:Zone.Identifier
 
+# External tools (OPSIN jar for IUPAC numbering in scripts/)
+*.jar
+
 # Local tool state
 .claude/settings.local.json
 graphify-out/

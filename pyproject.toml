@@ -13,6 +13,8 @@ dependencies = [
     "httpx>=0.28.1",
     "safetensors>=0.8",
     "tqdm>=4.67",
+    "openai>=3.46.0",
+    "graphifyy>=0.9.103",
 ]
 
 [project.optional-dependencies]
@@ -34,6 +36,9 @@ std = [
 # Neo4j knowledge graph (modephere.kg); the ChEMBL ETL itself needs only polars.
 kg = [
     "neo4j>=6.0",
+]
+viz = [
+    "matplotlib>=3.10",
 ]
 
 [project.scripts]
