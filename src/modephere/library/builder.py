@@ -29,6 +29,7 @@ from tqdm.auto import tqdm
 
 from modephere.chembl.lookup import ChemblLookup
 from modephere.core import CompoundError, build_file_logger
+from modephere.library.conformers import generate_conformers_batch
 from modephere.library.ingest.catalog import (
     CatalogLoad,
     load_catalog,
@@ -41,13 +42,20 @@ from modephere.library.molecules import SATURATING_FEATURES, FeatureSaturation
 from modephere.library.pipeline import build_artifacts
 from modephere.library.standardize import standardize
 from modephere.library.storage import LibraryStore
-from modephere.types import BuildStage, FailureCategory, FailureRecord
+from modephere.types import (
+    BuildStage,
+    ConformerBackend,
+    FailureCategory,
+    FailureRecord,
+)
 
 if TYPE_CHECKING:
     import httpx
 
     from modephere.library.config import LibraryBuildConfig
+    from modephere.library.conformers import ConformerSet
     from modephere.library.ingest.resolve import Resolution
+    from modephere.library.standardize import StandardizedMol
     from modephere.types import CompoundArtifacts
 
 logger = logging.getLogger(__name__)
@@ -229,15 +237,29 @@ class LibraryBuilder:
         tally: Counter[str] = Counter()
         seen: set[str] = set()
         pending: list[CompoundArtifacts] = []
+        ready: list[StandardizedMol] = []
+
+        def build_ready() -> None:
+            nonlocal pending
+            for outcome, art in self._build_batch(ready, manifest):
+                tally[outcome] += 1
+                if art is not None:
+                    pending.append(art)
+                if len(pending) >= cfg.flush_every:
+                    self._flush(pending, manifest)
+                    pending = []
+            ready.clear()
+
         pairs = zip(load.queries, resolutions, strict=True)
         for query, resolved in tqdm(pairs, total=len(load.queries), desc="Compounds"):
-            outcome, art = self._build_one(query.key, resolved, seen, manifest)
-            tally[outcome] += 1
-            if art is not None:
-                pending.append(art)
-            if len(pending) >= cfg.flush_every:
-                self._flush(pending, manifest)
-                pending = []
+            outcome, std = self._prepare(query.key, resolved, seen, manifest)
+            if std is None:
+                tally[outcome] += 1
+                continue
+            ready.append(std)
+            if len(ready) >= self._batch_size:
+                build_ready()
+        build_ready()
         self._flush(pending, manifest)
 
         for record in self.failures:
@@ -262,13 +284,38 @@ class LibraryBuilder:
         self._log_summary(summary)
         return summary
 
-    def _build_one(  # noqa: PLR0911 -- one return per outcome
+    @property
+    def _batch_size(self) -> int:
+        """Compounds whose conformers are generated together (GPU only)."""
+        pipeline = self.config.pipeline
+        gpu = pipeline.conformers.backend is ConformerBackend.NVMOLKIT
+        return self.config.conformer_batch_size if pipeline.build_3d and gpu else 1
+
+    def _build_batch(
+        self, ready: list[StandardizedMol], manifest: BuildManifest
+    ) -> list[tuple[str, CompoundArtifacts | None]]:
+        """Build and save ``ready``; one conformer call for all on the GPU."""
+        conformers: list[ConformerSet | CompoundError | None] = [None] * len(ready)
+        if ready and self._batch_size > 1:
+            conformers = list(
+                generate_conformers_batch(
+                    [(std.microspecies, std.record.inchikey) for std in ready],
+                    self.config.pipeline.conformers,
+                )
+            )
+        return [
+            self._build_std(std, cset, manifest)
+            for std, cset in zip(ready, conformers, strict=True)
+        ]
+
+    def _prepare(
         self,
         key: str,
         resolved: Resolution,
         seen: set[str],
         manifest: BuildManifest,
-    ) -> tuple[str, CompoundArtifacts | None]:
+    ) -> tuple[str, StandardizedMol | None]:
+        """Standardize; ``("ready", std)`` unless failed, duplicate or stored."""
         if isinstance(resolved, CompoundError):
             self._record_error(key, resolved)
             return "failed", None
@@ -288,10 +335,23 @@ class LibraryBuilder:
         if self.store.exists(inchikey) and not self.config.force:
             manifest.mark_done(inchikey)
             return "skipped", None
+        return "ready", std
 
+    def _build_std(
+        self,
+        std: StandardizedMol,
+        conformers: ConformerSet | CompoundError | None,
+        manifest: BuildManifest,
+    ) -> tuple[str, CompoundArtifacts | None]:
+        inchikey = std.record.inchikey
         before = self.saturation.total
         try:
-            art = build_artifacts(std, self.config.pipeline, saturation=self.saturation)
+            art = build_artifacts(
+                std,
+                self.config.pipeline,
+                saturation=self.saturation,
+                conformers=conformers,
+            )
         except CompoundError as e:
             self._record_error(inchikey, e)
             return "failed", None

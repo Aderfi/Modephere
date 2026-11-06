@@ -232,6 +232,8 @@
        retry with useRandomCoords on failure).
      - Optimize with MMFFOptimizeMoleculeConfs using MMFF94s, falling back to UFF if MMFF can't
        parametrize the molecule.
+     - Embedding and optimization run on RDKit (CPU) by default, or on nvMolKit (GPU, compounds
+       batched) with --conformer-backend gpu (ConformerParams.backend; see E, 2026-11-06).
      - Keep conformers within an energy window, e.g. 10 kcal/mol of the minimum.
      - Remove near-duplicates after optimization using symmetry-aware heavy-atom RMSD (GetBestRMS) and
        Butina clustering.
@@ -469,6 +471,36 @@
     joining bonded atoms while locants stay unique. Needs Java + the OPSIN jar
     (project root, gitignored); no IUPAC numbering without a PubChem name.
   - PubChemClient.inchikey_to_cids (same cache file as names, key "inchikey:<key>").
+
+  2026-11-06 — conformers on the GPU (nvMolKit 0.7.0)
+  - User decision: RDKit on the CPU stays the default; nvMolKit is opt-in with
+    `build --conformer-backend gpu` (cpu | gpu), which batches compounds through the
+    conformer stage (LibraryBuildConfig.conformer_batch_size, CLI --conformer-batch-size,
+    default 64; the CPU backend builds one compound at a time, as before). RDKit unpinned
+    by the user (now 2026.03.6):
+    the dev_Pgen parity tests skip ("golden data from RDKit 2025.09.6"), so 2D parity is
+    unchecked until the fixtures are regenerated on the same RDKit as dev_Pgen.
+  - ConformerParams.backend: "rdkit" (default) | "nvmolkit". Steps
+    1, 4, 5 (stereoisomers, energy window, GetBestRMS pruning) are shared code; nvMolKit runs
+    ETKDG (same EmbedParameters, embed-time pruning, random-coords retry) and MMFF94s / UFF
+    (MMFF/UFFBatchedForcefield, same maxIters, gradient tolerance 1e-4, Se/Te UFF retyping).
+    generate_conformers_batch() gives the GPU many compounds at once.
+  - Falls back to RDKit, recorded in ensemble.params.backend: no CUDA GPU / nvMolKit not
+    importable; > 256 atoms with H (nvMolKit's eigenvalue initialisation raises for the whole
+    call); any nvMolKit error (the batch is rerun on RDKit). Stored files without a backend key
+    load as "rdkit" (the default; everything built before this ran on RDKit).
+  - Batched builds: compounds are standardized, deduplicated and skip-checked one by one, then
+    every batch gets one generate_conformers_batch() call before the rest of the pipeline;
+    a conformer failure is raised after the earlier stages (same failure precedence as CPU).
+  - Not reproducible: the same seed gives different GPU ensembles (0 of 60 identical, kept
+    count changed in 22); that is why the CPU stays the default. The RDKit
+    backend is unchanged (byte-identical ensembles on an 8-molecule panel).
+  - Measured (60 random library compounds, RTX 4070 Ti SUPER, 8 cores): CPU 59.9 s, GPU one
+    compound per call 40.1 s, GPU one batch 36.3 s. GPU energies = RDKit MMFF94s on the same
+    coordinates (< 1e-5 kcal/mol); kept counts, minima and CPU/GPU coverage are within the
+    CPU-vs-CPU seed noise (scripts/nvmolkit_conformers.py, which also checks it per compound).
+    Exception seen: telithromycin (macrolide) minimum 15.7 kcal/mol higher on the GPU (CPU
+    seed noise 3.4). nvMolKit's own RMSD matrix is not symmetry-aware: pruning stays on RDKit.
 
   F. ChEMBL knowledge graph
 

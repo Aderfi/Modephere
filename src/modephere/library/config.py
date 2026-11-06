@@ -52,6 +52,12 @@ class LibraryBuildConfig(FrozenModel):
     flush_every: int = Field(
         default=200, gt=0, description="Compounds per table flush."
     )
+    conformer_batch_size: int = Field(
+        default=64,
+        gt=0,
+        description="Compounds per GPU conformer batch (nvmolkit backend only; "
+        "the CPU backend builds one compound at a time).",
+    )
 
     @model_validator(mode="after")
     def _has_input(self) -> Self:

@@ -13,13 +13,22 @@ from safetensors.numpy import load_file, save_file
 
 from modephere.config import get_settings
 from modephere.core import StorageError
+from modephere.library import __main__ as cli_module
+from modephere.library import builder as builder_module
 from modephere.library.__main__ import main
 from modephere.library.builder import LibraryBuilder
 from modephere.library.config import LibraryBuildConfig
+from modephere.library.conformers import generate_conformers_batch
 from modephere.library.manifest import BuildManifest
 from modephere.library.pipeline import PipelineOptions, build_compound
 from modephere.library.storage import LibraryStore
-from modephere.types import COMPOUNDS_SCHEMA, FailureCategory, check_frame
+from modephere.types import (
+    COMPOUNDS_SCHEMA,
+    ConformerBackend,
+    ConformerParams,
+    FailureCategory,
+    check_frame,
+)
 
 from .conftest import ASPIRIN, ASPIRIN_KEY, FAST, FakePubChem
 
@@ -64,6 +73,21 @@ class TestStore:
         save_file(arrays, path, metadata=json.loads(_metadata(path)))
         with pytest.raises(StorageError, match="corrupt"):
             store.load(ASPIRIN_KEY)
+
+    def test_files_without_backend_load_as_rdkit(
+        self, tmp_path: Path, aspirin: CompoundArtifacts
+    ) -> None:
+        # Written before ConformerParams.backend existed: always built on RDKit.
+        store = LibraryStore(tmp_path)
+        path = store.save(aspirin)
+        meta = json.loads(_metadata(path))
+        ensemble = json.loads(meta["conformers"])
+        del ensemble["params"]["backend"]
+        meta["conformers"] = json.dumps(ensemble)
+        save_file(load_file(path), path, metadata=meta)
+        loaded = store.load(ASPIRIN_KEY).conformers
+        assert loaded is not None
+        assert loaded.params.backend is ConformerBackend.RDKIT
 
     def test_tables_upsert(
         self, tmp_path: Path, aspirin: CompoundArtifacts, butanol: CompoundArtifacts
@@ -116,7 +140,51 @@ def _config(tmp_path: Path, **kw: object) -> LibraryBuildConfig:
     return LibraryBuildConfig.model_validate(defaults | kw)
 
 
+GPU_FAST = PipelineOptions(
+    conformers=FAST.conformers.model_copy(update={"backend": ConformerBackend.NVMOLKIT})
+)
+
+
 class TestBuilder:
+    def test_gpu_backend_batches_conformers(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        batches: list[int] = []
+
+        def spy(
+            compounds: list[tuple[Chem.Mol, str]], params: ConformerParams
+        ) -> object:
+            batches.append(len(compounds))
+            on_cpu = params.model_copy(update={"backend": ConformerBackend.RDKIT})
+            return generate_conformers_batch(compounds, on_cpu)
+
+        monkeypatch.setattr(builder_module, "generate_conformers_batch", spy)
+        cfg = _config(
+            tmp_path,
+            smiles=(ASPIRIN, "CC(=O)Oc1ccccc1C(=O)[O-].[Na+]", "C", "bad(", "CC(O)CC"),
+            pipeline=GPU_FAST,
+            conformer_batch_size=2,
+        )
+        summary = LibraryBuilder(cfg).run()
+        # aspirin, methane, butan-2-ol reach the conformer stage (the salt is a
+        # duplicate, "bad(" never parses): one batch of 2, then 1.
+        assert batches == [2, 1]
+        # same outcome as the CPU build (test_smiles_build_offline): methane still
+        # fails at the pharmacophore stage, before its conformers are used.
+        assert (summary.built, summary.duplicates, summary.failed) == (2, 1, 2)
+        assert summary.failures == {
+            FailureCategory.NO_PHARMACOPHORE_FEATURES: 1,
+            FailureCategory.INVALID_SMILES: 1,
+        }
+        assert len(LibraryStore(cfg.library_root)) == 2
+
+    def test_cpu_backend_does_not_batch(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(builder_module, "generate_conformers_batch", pytest.fail)
+        cfg = _config(tmp_path, smiles=(ASPIRIN, "CC(O)CC"))
+        assert LibraryBuilder(cfg).run().built == 2
+
     def test_needs_some_input(self, tmp_path: Path) -> None:
         with pytest.raises(ValueError, match="catalog"):
             _config(tmp_path)
@@ -215,6 +283,26 @@ class TestCli:
         assert LibraryStore(tmp_path / "lib").inchikeys() == [ASPIRIN_KEY]
         assert main(["export-sdf", ASPIRIN_KEY, str(tmp_path / "a.sdf")]) == 0
         assert (tmp_path / "a.sdf").exists()
+
+    @pytest.mark.parametrize(
+        ("flag", "backend"),
+        [
+            (None, ConformerBackend.RDKIT),
+            ("cpu", ConformerBackend.RDKIT),
+            ("gpu", ConformerBackend.NVMOLKIT),
+        ],
+    )
+    def test_conformer_backend_flag(
+        self, flag: str | None, backend: ConformerBackend
+    ) -> None:
+        argv = ["build", "--smiles", ASPIRIN, "--conformer-batch-size", "8"]
+        if flag is not None:
+            argv += ["--conformer-backend", flag]
+        cfg = cli_module._config(
+            cli_module._build_parser().parse_args(argv), build=True
+        )
+        assert cfg.pipeline.conformers.backend is backend
+        assert cfg.conformer_batch_size == 8
 
     def test_failures_exit_2(self) -> None:
         assert main(["build", "--smiles", "C", "--2d-only"]) == 2

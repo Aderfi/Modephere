@@ -30,9 +30,16 @@ from modephere.library.config import LibraryBuildConfig
 from modephere.library.pipeline import PipelineOptions
 from modephere.library.standardize import StandardizeOptions
 from modephere.library.storage import LibraryStore
-from modephere.types import AmbiguityPolicy, ConformerParams, FragmentPolicy
+from modephere.types import (
+    AmbiguityPolicy,
+    ConformerBackend,
+    ConformerParams,
+    FragmentPolicy,
+)
 
 logger = logging.getLogger(__name__)
+
+_CONFORMER_BACKENDS = {"cpu": ConformerBackend.RDKIT, "gpu": ConformerBackend.NVMOLKIT}
 
 
 def _add_inputs(p: argparse.ArgumentParser) -> None:
@@ -80,6 +87,19 @@ def _build_parser() -> argparse.ArgumentParser:
     build.add_argument("--seed", type=int, default=42)
     build.add_argument("--threads", type=int, default=0, help="0 = all cores.")
     build.add_argument(
+        "--conformer-backend",
+        choices=list(_CONFORMER_BACKENDS),
+        default="cpu",
+        help="cpu: RDKit, one compound at a time, reproducible (default). gpu: "
+        "nvMolKit, compounds batched (RDKit fallback without a usable GPU).",
+    )
+    build.add_argument(
+        "--conformer-batch-size",
+        type=int,
+        default=64,
+        help="Compounds per GPU conformer batch (gpu backend only).",
+    )
+    build.add_argument(
         "--fragment-policy",
         choices=[f.value for f in FragmentPolicy],
         default=FragmentPolicy.LARGEST_FRAGMENT.value,
@@ -114,9 +134,11 @@ def _config(args: argparse.Namespace, *, build: bool) -> LibraryBuildConfig:
             min_conformers=min(10, args.max_conformers),
             random_seed=args.seed,
             num_threads=args.threads,
+            backend=_CONFORMER_BACKENDS[args.conformer_backend],
         )
         overrides |= {
             "offline": not args.online,
+            "conformer_batch_size": args.conformer_batch_size,
             "force": args.force,
             "pipeline": PipelineOptions(
                 standardize=StandardizeOptions(

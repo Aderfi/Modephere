@@ -78,6 +78,13 @@ class EmbeddingMethod(StrEnum):
     SR_ETKDG_V3 = "srETKDGv3"  # small-ring torsion preferences
 
 
+class ConformerBackend(StrEnum):
+    """Where conformers are embedded and optimised (steps 2-3 of PLAN C2.2)."""
+
+    RDKIT = "rdkit"  # CPU, compound by compound; reproducible (default)
+    NVMOLKIT = "nvmolkit"  # CUDA GPU, batched; same seed is not bit-reproducible
+
+
 class ForceField(StrEnum):
     """Force field used to optimise conformers."""
 
@@ -177,6 +184,7 @@ __all__ = [
     "AmbiguityPolicy",
     "BuildStage",
     "ChemblMatch",
+    "ConformerBackend",
     "EmbeddingMethod",
     "FailureCategory",
     "ForceField",

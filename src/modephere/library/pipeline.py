@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING
 from pydantic import Field
 
 from modephere.core import CompoundError
-from modephere.library.conformers import generate_conformers
+from modephere.library.conformers import ConformerSet, generate_conformers
 from modephere.library.molecules import molecule_graph
 from modephere.library.pharmacophore.features import perceive
 from modephere.library.pharmacophore.fingerprints import gobbi_pharm2d, triplet_pharm3d
@@ -63,8 +63,15 @@ def build_artifacts(
     options: PipelineOptions | None = None,
     *,
     saturation: FeatureSaturation | None = None,
+    conformers: ConformerSet | CompoundError | None = None,
 ) -> CompoundArtifacts:
-    """Every representation of one standardized compound."""
+    """Every representation of one standardized compound.
+
+    ``conformers``: the compound's result from
+    :func:`~modephere.library.conformers.generate_conformers_batch` when the
+    caller batched the conformer stage (a ``CompoundError`` is raised here, after
+    the earlier stages, as if it had happened here); None generates them.
+    """
     opts = options or PipelineOptions()
     record = std.record
     molecule = molecule_graph(std.working, saturation=saturation)
@@ -82,10 +89,14 @@ def build_artifacts(
         features=features,
     )
 
-    conformers = p3d = fp3d = None
+    ensemble = p3d = fp3d = None
     if opts.build_3d:
-        cset = generate_conformers(std.microspecies, record.inchikey, opts.conformers)
-        conformers = cset.ensemble
+        if isinstance(conformers, CompoundError):
+            raise conformers
+        cset = conformers or generate_conformers(
+            std.microspecies, record.inchikey, opts.conformers
+        )
+        ensemble = cset.ensemble
         p3d = place_features(
             cset.mol,
             p2d.features,
@@ -100,7 +111,7 @@ def build_artifacts(
         pharmacophore=pharmacophore_graph(std.microspecies, p2d.features),
         pharmacophore_2d=p2d,
         pharm2d_fingerprint=gobbi_pharm2d(std.microspecies),
-        conformers=conformers,
+        conformers=ensemble,
         pharmacophores_3d=p3d or (),
         pharm3d_fingerprint=fp3d,
     )

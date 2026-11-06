@@ -3,7 +3,8 @@
 Defaults are the PLAN defaults (Q5/Q6): an ensemble of 10–50 conformers
 scaled by rotatable bonds, ETKDGv3, MMFF94s with a UFF fallback, a
 10 kcal/mol energy window, 0.5 Å heavy-atom RMSD pruning, stereoisomers
-enumerated up to 8.
+enumerated up to 8, embedded and optimised by RDKit on the CPU (nvMolKit on the
+GPU is opt-in).
 
 Coordinates are one ``float32`` array ``[C, N, 3]`` per ensemble, not one
 object per conformer: that is the shape the storage layer writes and the PyG
@@ -19,7 +20,12 @@ from pydantic import Field, NonNegativeInt, PositiveInt, model_validator
 
 from modephere.types.arrays import Float32Array
 from modephere.types.base import ArrayModel, FrozenModel
-from modephere.types.enums import EmbeddingMethod, ForceField, StereoPolicy
+from modephere.types.enums import (
+    ConformerBackend,
+    EmbeddingMethod,
+    ForceField,
+    StereoPolicy,
+)
 from modephere.types.scalars import (
     Angstrom,
     InChIKey,
@@ -62,6 +68,12 @@ class ConformerParams(FrozenModel):
     )
     stereo_policy: StereoPolicy = StereoPolicy.ENUMERATE
     max_stereoisomers: PositiveInt = 8
+    backend: ConformerBackend = Field(
+        default=ConformerBackend.RDKIT,
+        description="Where embedding and optimisation run: RDKit on the CPU "
+        "(reproducible) or nvMolKit on the GPU (batched; falls back to RDKit "
+        "without a usable GPU). An ensemble records the backend that ran.",
+    )
 
     @model_validator(mode="after")
     def _check(self) -> Self:

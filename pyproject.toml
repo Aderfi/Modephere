@@ -8,21 +8,23 @@ dependencies = [
     "pydantic>=2.12.5",
     "numpy>=2.4",
     "polars>=1.39",  # tabular data: never pandas
-    "rdkit==2025.9.6",
+    "rdkit",
     "pydantic-settings>=2.14",
     "httpx>=0.28.1",
     "safetensors>=0.8",
     "tqdm>=4.67",
     "openai>=3.46.0",
     "graphifyy>=0.9.103",
+    "nvmolkit",
+    "torch==2.12",
 ]
 
 [project.optional-dependencies]
 # torch / PyG are only needed by modephere.types.tensors and (later) featurize/.
 ml = [
-    "torch==2.12.1",
-    "torch-geometric>=2.8.1,<2.9",
-    "pyg_lib==0.7.0",
+    "torch==2.12",
+    "torch-geometric",
+    "pyg_lib",
 ]
 dev = [
     "pytest>=8.0.0",

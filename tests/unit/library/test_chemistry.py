@@ -5,9 +5,15 @@ from __future__ import annotations
 import numpy as np
 import pytest
 from rdkit import Chem
+from rdkit.Chem import AllChem
 
 from modephere.core import CompoundError
-from modephere.library.conformers import generate_conformers
+from modephere.library import conformers
+from modephere.library.conformers import (
+    generate_conformers,
+    generate_conformers_batch,
+    nvmolkit_available,
+)
 from modephere.library.pharmacophore import (
     perceive,
     place_features,
@@ -19,6 +25,7 @@ from modephere.library.pipeline import PipelineOptions, build_compound
 from modephere.library.standardize import StandardizeOptions, protonate, standardize
 from modephere.types import (
     TRIPLET_PHARM3D_V1,
+    ConformerBackend,
     ConformerParams,
     FailureCategory,
     ForceField,
@@ -184,7 +191,9 @@ class TestConformers:
         return micro
 
     def test_deterministic(self) -> None:
+        # RDKit (the default) is reproducible from the seed; nvMolKit is not.
         params = ConformerParams(num_conformers=6)
+        assert params.backend is ConformerBackend.RDKIT
         a = generate_conformers(self._micro("CCCCOc1ccccc1"), ASPIRIN_KEY, params)
         b = generate_conformers(self._micro("CCCCOc1ccccc1"), ASPIRIN_KEY, params)
         assert a.ensemble == b.ensemble
@@ -249,6 +258,93 @@ class TestConformers:
         n = cset.ensemble.num_heavy_atoms
         assert all(a.GetAtomicNum() > 1 for a in atoms[:n])
         assert all(a.GetAtomicNum() == 1 for a in atoms[n:])
+
+
+RDKIT = ConformerParams()
+GPU = ConformerParams(backend=ConformerBackend.NVMOLKIT)
+needs_gpu = pytest.mark.skipif(
+    not nvmolkit_available(), reason="nvMolKit needs a CUDA GPU"
+)
+
+
+def _micro(smiles: str) -> Chem.Mol:
+    micro: Chem.Mol = protonate(Chem.MolFromSmiles(smiles))
+    return micro
+
+
+class TestConformerBackends:
+    @needs_gpu
+    def test_nvmolkit_ensemble(self) -> None:
+        cset = generate_conformers(_micro("CC(O)CCOc1ccccc1"), ASPIRIN_KEY, GPU)
+        e = cset.ensemble
+        assert e.params.backend is ConformerBackend.NVMOLKIT
+        assert e.force_field is ForceField.MMFF94S
+        assert {c.stereoisomer for c in e.conformers} == {0, 1}
+        energies = e.energies
+        assert energies is not None
+        assert list(energies) == sorted(energies)
+        # GPU energies are RDKit's MMFF94s on the returned coordinates
+        props = AllChem.MMFFGetMoleculeProperties(cset.mol, mmffVariant="MMFF94s")
+        for i, energy in enumerate(energies):
+            ff = AllChem.MMFFGetMoleculeForceField(cset.mol, props, confId=i)
+            assert ff.CalcEnergy() == pytest.approx(energy, abs=1e-3)
+
+    @needs_gpu
+    @pytest.mark.parametrize("smiles", ["OB(O)c1ccccc1", "O=C1c2ccccc2[Se]N1c1ccccc1"])
+    def test_nvmolkit_uff_fallback(self, smiles: str) -> None:
+        e = generate_conformers(_micro(smiles), ASPIRIN_KEY, GPU).ensemble
+        assert e.params.backend is ConformerBackend.NVMOLKIT
+        assert e.force_field is ForceField.UFF
+        assert all(c.converged for c in e.conformers)
+
+    @needs_gpu
+    def test_batch_keeps_order_and_isolates_failures(self) -> None:
+        params = GPU.model_copy(update={"fallback_force_field": None})  # no B in MMFF
+        out = generate_conformers_batch(
+            [
+                (_micro("CCCCO"), ASPIRIN_KEY),
+                (_micro("OB(O)c1ccccc1"), ASPIRIN_KEY),
+                (_micro("c1ccccc1"), ASPIRIN_KEY),
+            ],
+            params,
+        )
+        assert isinstance(out[1], CompoundError)
+        assert out[1].category is FailureCategory.FORCEFIELD_FAILED
+        butanol, benzene = out[0], out[2]
+        assert not isinstance(butanol, CompoundError)
+        assert not isinstance(benzene, CompoundError)
+        assert butanol.ensemble.num_atoms == 15
+        assert benzene.ensemble.num_conformers == 1
+
+    def test_no_gpu_falls_back_to_rdkit(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(conformers, "nvmolkit_available", lambda: False)
+        micro = _micro("CCCCOc1ccccc1")
+        e = generate_conformers(micro, ASPIRIN_KEY, GPU).ensemble
+        assert e.params.backend is ConformerBackend.RDKIT
+        assert e == generate_conformers(micro, ASPIRIN_KEY, RDKIT).ensemble
+
+    def test_nvmolkit_failure_reruns_on_rdkit(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def broken(*_: object) -> None:
+            msg = "simulated nvMolKit failure"
+            raise RuntimeError(msg)
+
+        monkeypatch.setattr(conformers, "nvmolkit_available", lambda: True)
+        monkeypatch.setattr(conformers, "_run_nvmolkit", broken)
+        micro = _micro("CCCCOc1ccccc1")
+        e = generate_conformers(micro, ASPIRIN_KEY, GPU).ensemble
+        assert e.params.backend is ConformerBackend.RDKIT
+        assert e == generate_conformers(micro, ASPIRIN_KEY, RDKIT).ensemble
+
+    def test_over_256_atoms_runs_on_rdkit(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(conformers, "nvmolkit_available", lambda: True)
+        monkeypatch.setattr(conformers, "_run_nvmolkit", pytest.fail)
+        job = conformers._job(_micro("C" * 90), ASPIRIN_KEY, GPU)
+        assert job.mols[0].GetNumAtoms() == 272
+        assert job.backend is ConformerBackend.RDKIT
 
 
 def _rotation(seed: int) -> np.ndarray:
