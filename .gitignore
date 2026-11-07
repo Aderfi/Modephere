@@ -56,3 +56,4 @@ Thumbs.db
 # Local tool state
 .claude/settings.local.json
 graphify-out/
+publish.sh
