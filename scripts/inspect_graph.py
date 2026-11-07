@@ -1,4 +1,4 @@
-"""Inspect the Neo4j knowledge graphs: overall structure, or one node's neighbourhood.
+"""Inspect the Neo4j knowledge graphs: overall structure, the pgx layer, or one node.
 
 Usage (from the project root)::
 
@@ -13,6 +13,20 @@ Usage (from the project root)::
     uv run python scripts/inspect_graph.py node warfarin          # Compound by name
     uv run python scripts/inspect_graph.py node PJVWKTKQMONHTI-UHFFFAOYSA-N
     uv run python scripts/inspect_graph.py node VKORC1 --label Gene
+
+    # pharmacogenomic layer: the label is guessed from the identifier
+    uv run python scripts/inspect_graph.py pgx                     # resolution overview
+    uv run python scripts/inspect_graph.py node CYP2D6              # Gene (no Compound hit)
+    uv run python scripts/inspect_graph.py node rs9923231           # RefSNP
+    uv run python scripts/inspect_graph.py node NC_000016.10:g.31096368C>T   # Variant
+    uv run python scripts/inspect_graph.py node NC_000016.10:31096367:C:T    # Variant (SPDI)
+    uv run python scripts/inspect_graph.py node rs9923231 --label Variant    # by metadata
+    uv run python scripts/inspect_graph.py node 'CYP2D6*4'          # Haplotype
+    uv run python scripts/inspect_graph.py node 'CYP2D6*1/*4'       # Genotype (diplotype)
+    uv run python scripts/inspect_graph.py node rs9923231:C/T       # Genotype (site)
+    uv run python scripts/inspect_graph.py node 'GSTM1 null'        # Allele label
+    uv run python scripts/inspect_graph.py node 1451834452          # Annotation
+
     uv run python scripts/inspect_graph.py node warfarin --db pgen --label Drug
     uv run python scripts/inspect_graph.py node rs9923231 --db pgen --label RefSNP
 
@@ -23,6 +37,7 @@ Databases: ``modephere`` (bolt://localhost:7688, ``MODEPHERE_KG__*``) and ``pgen
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from typing import TYPE_CHECKING, Any
 
@@ -37,6 +52,14 @@ from _common import (
     section,
     show,
     subsection,
+)
+from _pgx import (
+    LIST_KEYS,
+    VIEWS,
+    Attempt,
+    lookup_attempts,
+    overview,
+    variant_attempts,
 )
 
 from modephere.kg.schema import NODE_KEYS
@@ -63,6 +86,7 @@ DISPLAY = (
     "symbol",
     "label",
     "rsid",
+    "hgvs_g38",
     "code",
     "mesh_heading",
     "warning_type",
@@ -81,6 +105,10 @@ REL_PROPS = (
     "enzyme_name",
     "phase",
     "form",
+    "copies",
+    "min_copies",
+    "strand_assumed",
+    "evidence",
 )
 
 # --------------------------------------------------------------------------- #
@@ -297,52 +325,94 @@ def _display(props: dict[str, Any]) -> str:
     return "?"
 
 
+_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _compound_attempts(value: str) -> list[Attempt]:
+    if value.upper().startswith("CHEMBL"):
+        return [("Compound", "chembl_id", value.upper())]
+    if is_inchikey(value):
+        return [("Compound", "inchikey", value)]
+    return [("Compound", "pref_name", value.upper())]
+
+
+def _attempts(
+    value: str, label: str | None, keys: dict[str, str], db: str
+) -> list[Attempt]:
+    """Candidate ``(label, property, value)`` lookups, most likely first."""
+    if label == "Compound":
+        return _compound_attempts(value)
+    if label == "Variant" and db == "modephere":
+        return variant_attempts(value)
+    if label is not None:
+        return [(label, keys[label], value)]
+    if db != "modephere":
+        return [("Drug", keys["Drug"], value)]
+    pgx = lookup_attempts(value)
+    if pgx is not None:
+        return pgx
+    return [
+        *_compound_attempts(value),
+        ("Gene", "symbol", value),
+        ("Drug", "name", value),
+        ("Allele", "label", value),
+    ]
+
+
+def _match(
+    graph: KnowledgeGraph, attempt: Attempt, *, any_case: bool
+) -> list[dict[str, Any]]:
+    label, key, value = attempt
+    if not (_IDENTIFIER.match(label) and _IDENTIFIER.match(key)):
+        raise ValueError(f"not a label / property name: {label!r}, {key!r}")
+    if key in LIST_KEYS:
+        where = f"$value IN n.{key}"
+    elif any_case:
+        where = f"toLower(toString(n.{key})) = toLower($value)"
+    else:
+        where = f"n.{key} = $value"
+    return graph.run(
+        f"MATCH (n:{label}) WHERE {where} RETURN n, elementId(n) AS id LIMIT 6",
+        value=value,
+    )
+
+
 def _find(
-    graph: KnowledgeGraph, value: str, label: str | None, keys: dict[str, str]
+    graph: KnowledgeGraph,
+    value: str,
+    label: str | None,
+    keys: dict[str, str],
+    db: str,
 ) -> tuple[str, dict[str, Any], str] | None:
-    """(label, properties, elementId) of the node, or None (candidates printed)."""
-    if label is None:
-        label = "Compound" if "Compound" in keys else "Drug"
-    if label not in keys:
+    """(label, properties, elementId) of the node, or None (candidates printed).
+
+    Every candidate is tried with an exact match first; only then case-blind.
+    """
+    if label is not None and label not in keys:
         note(f"unknown label {label!r}; known: {', '.join(keys)}")
         return None
-    key = keys[label]
-    attempts: list[tuple[str, str]] = [(key, value)]
-    if label == "Compound":
-        if value.upper().startswith("CHEMBL"):
-            attempts = [("chembl_id", value.upper())]
-        elif is_inchikey(value):
-            attempts = [("inchikey", value)]
-        else:
-            attempts = [("pref_name", value.upper())]
-    for k, v in attempts:
-        rows = graph.run(
-            "MATCH (n) WHERE $label IN labels(n) AND n[$key] = $value "
-            "RETURN n, elementId(n) AS id LIMIT 5",
-            label=label,
-            key=k,
-            value=v,
-        )
-        if not rows:
-            rows = graph.run(
-                "MATCH (n) WHERE $label IN labels(n) "
-                "AND toLower(toString(n[$key])) = toLower($value) "
-                "RETURN n, elementId(n) AS id LIMIT 5",
-                label=label,
-                key=k,
-                value=v,
-            )
-        if len(rows) > 1:
-            note(f"{len(rows)} :{label} nodes have {k} = {v!r}; showing the first")
-        if rows:
-            return label, dict(rows[0]["n"]), rows[0]["id"]
-    if label == "Compound":
+    attempts = _attempts(value, label, keys, db)
+    for any_case in (False, True):
+        for attempt in attempts:
+            rows = _match(graph, attempt, any_case=any_case)
+            if not rows:
+                continue
+            found, key, _ = attempt
+            if len(rows) > 1:
+                others = ", ".join(_display(dict(r["n"])) for r in rows[1:])
+                note(
+                    f"{len(rows)}{'+' if len(rows) == 6 else ''} :{found} nodes "
+                    f"match {key} = {value!r}; showing the first (others: {others})"
+                )
+            return found, dict(rows[0]["n"]), rows[0]["id"]
+    if any(a[0] == "Compound" for a in attempts):
         hits = graph.search_compounds(value, 10)
         if hits.height:
             show(hits, 10, title=f"No exact match; full-text candidates for {value!r}")
             note("re-run with one of these chembl_id values")
             return None
-    note(f"no :{label} node with {key} = {value!r}")
+    tried = ", ".join(f":{lab}.{key}" for lab, key, _ in attempts)
+    note(f"no node matches {value!r} (tried {tried})")
     return None
 
 
@@ -354,7 +424,7 @@ def cmd_node(args: argparse.Namespace) -> int:
         note(str(e))
         return 1
     with graph:
-        found = _find(graph, args.value, args.label, keys)
+        found = _find(graph, args.value, args.label, keys, args.db)
         if found is None:
             return 1
         label, props, element_id = found
@@ -431,6 +501,8 @@ def cmd_node(args: argparse.Namespace) -> int:
                 args.limit,
                 title="Compounds acting on this gene's targets",
             )
+        if args.db == "modephere" and label in VIEWS:
+            VIEWS[label](graph, props, args.limit)
 
         if props.get("run_id"):
             prov = graph.run(PROVENANCE, run_id=props["run_id"])
@@ -448,6 +520,23 @@ def _cell(value: Any) -> Any:
     if isinstance(value, list):
         return ", ".join(map(str, value))
     return value if value is None else str(value)
+
+
+# --------------------------------------------------------------------------- #
+# pgx
+# --------------------------------------------------------------------------- #
+
+
+def cmd_pgx(args: argparse.Namespace) -> int:
+    try:
+        graph = open_graph("modephere")
+    except GraphUnavailable as e:
+        note(str(e))
+        return 1
+    with graph:
+        section("Pharmacogenomic layer (modephere graph)")
+        overview(graph, args.limit)
+    return 0
 
 
 # --------------------------------------------------------------------------- #
@@ -473,17 +562,26 @@ def main(argv: list[str] | None = None) -> int:
     schema.add_argument(
         "--no-properties", action="store_true", help="Skip the per-label property scan."
     )
+    pgx = sub.add_parser(
+        "pgx", help="Pharmacogenomic layer: coverage and what did not resolve."
+    )
+    pgx.add_argument("--limit", type=int, default=20, help="Genes in the top list.")
     node = sub.add_parser("node", help="One node and its neighbourhood.")
-    node.add_argument("value", help="Key value: ChEMBL ID, name, InChIKey, symbol...")
+    node.add_argument(
+        "value",
+        help="ChEMBL ID, name, InChIKey, gene symbol, rsID, HGVS, SPDI, star allele, "
+        "genotype or annotation id.",
+    )
     node.add_argument("--db", choices=["modephere", "pgen"], default="modephere")
     node.add_argument(
         "--label",
-        help="Node label (default: Compound on modephere, Drug on pgen). "
+        help="Node label (default: guessed from the value on modephere, Drug on pgen). "
         f"Modephere: {', '.join(NODE_KEYS)}. pgen: {', '.join(PGEN_KEYS)}.",
     )
     node.add_argument("--limit", type=int, default=10, help="Neighbours per type.")
     args = parser.parse_args(argv)
-    return cmd_schema(args) if args.command == "schema" else cmd_node(args)
+    commands = {"schema": cmd_schema, "pgx": cmd_pgx, "node": cmd_node}
+    return commands[args.command](args)
 
 
 if __name__ == "__main__":
