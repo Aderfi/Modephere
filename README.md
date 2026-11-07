@@ -33,7 +33,7 @@ Extras: `ml` (torch + PyG), `gpu` (torch + nvMolKit), `kg` (neo4j), `pgx`
 Each GitHub release carries the wheel. From another uv project:
 
 ```bash
-uv add "modephere[all] @ https://github.com/Aderfi/Modephere/releases/download/v0.1.1/modephere-0.1.1-py3-none-any.whl"
+uv add "modephere[all] @ https://github.com/Aderfi/Modephere/releases/download/v0.1.2/modephere-0.1.2-py3-none-any.whl"
 ```
 
 `[tool.uv.sources]` is not part of the wheel, and uv applies a project's
@@ -64,7 +64,7 @@ explicit = true
 [tool.uv.sources]
 torch = { index = "pytorch-cu132" }
 pyg_lib = { index = "pyg" }
-modephere = { url = "https://github.com/Aderfi/Modephere/releases/download/v0.1.1/modephere-0.1.1-py3-none-any.whl" }
+modephere = { url = "https://github.com/Aderfi/Modephere/releases/download/v0.1.2/modephere-0.1.2-py3-none-any.whl" }
 ```
 
 With pip: `--extra-index-url https://download.pytorch.org/whl/cu132
