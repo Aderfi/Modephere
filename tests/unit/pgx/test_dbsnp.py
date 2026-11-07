@@ -11,6 +11,7 @@ from modephere.pgx.sources.dbsnp import (
     RefSNPRecord,
     Unresolved,
     parse_esummary,
+    protein_by_spdi,
 )
 
 from .conftest import FIXTURES
@@ -99,3 +100,35 @@ def test_unparseable_spdi_skipped_not_fatal():
     record = {"snp_id": 3, "spdi": "NC_000010.11:5:R:A,NC_000010.11:5:G:A", "genes": []}
     r = _ok(parse_esummary(_entry(record), "rs3", BUILD))
     assert r.grch38_spdis == ("NC_000010.11:5:G:A",)
+
+
+def test_each_allele_gets_its_own_protein_change():
+    # rs1065852: G>A is CYP2D6 P34S (*10), G>C is P34A
+    r = _ok(parse_esummary(entry_for(1065852), "rs1065852", BUILD))
+    assert r.protein_hgvs == {
+        "NC_000022.11:42130691:G:A": "NP_000097.3:p.Pro34Ser",
+        "NC_000022.11:42130691:G:C": "NP_000097.3:p.Pro34Ala",
+    }
+    assert r.so_terms == ("missense_variant", "coding_sequence_variant")
+
+
+def test_non_coding_site_has_terms_but_no_protein_change():
+    r = _ok(parse_esummary(entry_for(3892097), "rs3892097", BUILD))
+    assert r.protein_hgvs == {}
+    assert "splice_acceptor_variant" in r.so_terms
+
+
+def test_protein_accession_with_another_allele_count_is_not_used():
+    spdis = ["NC_1:9:A:C", "NC_1:9:A:G", "NC_1:9:A:T"]
+    docsum = (
+        "HGVS=NC_1:g.10A>C,NC_1:g.10A>G,NC_1:g.10A>T,"
+        "NP_1.1:p.Lys4Asn,NP_1.1:p.Lys4Glu,"  # 2 changes for 3 alleles: ambiguous
+        "NP_2.1:p.Lys9Gln,NP_2.1:p.Lys9Arg,NP_2.1:p.Lys9Ter|SEQ=[A/C/G/T]"
+    )
+    assert protein_by_spdi(docsum, spdis) == {
+        "NC_1:9:A:C": "NP_2.1:p.Lys9Gln",
+        "NC_1:9:A:G": "NP_2.1:p.Lys9Arg",
+        "NC_1:9:A:T": "NP_2.1:p.Lys9Ter",
+    }
+    assert protein_by_spdi("HGVS=NP_1.1:p.Lys4Asn|SEQ=[A/C]", spdis[:2]) == {}
+    assert protein_by_spdi(None, spdis) == {}

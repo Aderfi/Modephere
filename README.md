@@ -199,8 +199,12 @@ Inputs live under `data/pgx/` (`pharmgkb/var_*_ann.tsv`, `pharmvar/<GENE>/`,
 `resolution_report.tsv` and `disagreements.tsv`. `export` writes
 `annotation_rows.parquet` (each drug as `{name, cid, chembl_id, inchikey}`, the InChIKey
 naming its `compounds/<InChIKey>.safetensors`), `allele_variants.parquet`,
-`annotation_variants.parquet` and `annotation_genotypes.parquet` (each tested / compared
-genotype with its per-variant dosage, star alleles expanded into their mutations).
+`annotation_variants.parquet`, `annotation_genotypes.parquet` (each tested / compared
+genotype with its per-variant dosage, star alleles expanded into their mutations) and
+`variants.parquet` (each variant's genes, rsIDs, star alleles, dbSNP SO consequence terms
+and its own protein change, `NP_…:p.`) and `haplotypes.parquet` (every PharmVar / ClinPGx
+haplotype with its cis variants, HGVS, structure and core allele, named by an annotation or
+not).
 
 ## Library layout
 

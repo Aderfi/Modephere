@@ -13,8 +13,12 @@ from modephere.pgx.build import DisagreementRow, ResolutionRow, UnresolvedCase
 from modephere.pgx.export import (
     ANNOTATION_GENOTYPE_SCHEMA,
     ANNOTATION_ROW_SCHEMA,
+    HAPLOTYPE_SCHEMA,
+    VARIANT_SCHEMA,
     annotation_genotypes,
     annotation_rows,
+    haplotypes,
+    variants,
 )
 from modephere.pgx.inputs import Inputs, PgxLayout
 from modephere.pgx.report import UNRESOLVED_LOG, write_report
@@ -242,6 +246,41 @@ def test_annotation_genotypes_carry_dosage() -> None:
     frame = annotation_genotypes(_RowsGraph([row]))  # type: ignore[arg-type]
     assert frame.schema == pl.Schema(ANNOTATION_GENOTYPE_SCHEMA)
     assert frame["variants"][0].to_list()[0]["copies"] == 2
+
+
+def test_variants_table_carries_consequences() -> None:
+    row = {
+        "hgvs_g38": "NC_000010.11:g.94942290C>T",
+        "spdi_g38": "NC_000010.11:94942289:C:T",
+        "genes": ["CYP2C9"],
+        "rsids": ["rs1799853"],
+        "star_alleles": ["CYP2C9*2"],
+        "so_terms": ["missense_variant", "coding_sequence_variant"],
+        "p_hgvs": "NP_000762.2:p.Arg144Cys",
+        "sources": ["dbsnp"],
+        "run_id": "r1",
+    }
+    frame = variants(_RowsGraph([row]))  # type: ignore[arg-type]
+    assert frame.schema == pl.Schema(VARIANT_SCHEMA)
+    assert frame["p_hgvs"][0] == "NP_000762.2:p.Arg144Cys"
+
+
+def test_haplotypes_table_lists_cis_members() -> None:
+    row = {
+        "name": "CYP2C19*2.001",
+        "gene": "CYP2C19",
+        "is_reference": False,
+        "structure": None,
+        "hgvs_g38": "NC_000010.11:g.[94781859G>A;94842866A>G]",
+        "hgvs_t2t": None,
+        "variants": ["NC_000010.11:g.94781859G>A", "NC_000010.11:g.94842866A>G"],
+        "suballele_of": "CYP2C19*2",
+        "sources": ["pharmvar"],
+        "run_id": "r1",
+    }
+    frame = haplotypes(_RowsGraph([row]))  # type: ignore[arg-type]
+    assert frame.schema == pl.Schema(HAPLOTYPE_SCHEMA)
+    assert frame["variants"][0].to_list()[1] == "NC_000010.11:g.94842866A>G"
 
 
 def test_unresolved_log_lists_every_case(tmp_path: Path) -> None:

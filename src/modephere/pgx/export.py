@@ -21,6 +21,14 @@
   ``gene_copies_min`` count gene copies (a deletion adds none);
   ``strand_assumed`` marks links read on PharmGKB's forward-strand convention
   where the report alone could not prove the strand.
+* ``variants.parquet`` — one row per ``:Variant`` with what is known about it:
+  ``genes`` (dbSNP ``IN_GENE`` plus the gene of every PharmVar haplotype it
+  defines), ``rsids``, ``star_alleles``, ``so_terms`` (dbSNP ``fxn_class``,
+  for the site) and ``p_hgvs`` (this allele's protein change, ``NP_…:p.``).
+* ``haplotypes.parquet`` — every PharmVar / ClinPGx haplotype with its gene,
+  cis ``variants`` (genomic order), ``hgvs_g38`` / ``hgvs_t2t``, ``structure``
+  (gene deletion, HLA-typed) and the core allele a sub-allele belongs to —
+  including haplotypes no annotation names.
 
 Variants are identified by ``hgvs_g38`` (GRCh38 genomic HGVS); ``spdi_g38``
 travels along. ``annotation_rows`` keeps every annotation and the full drug
@@ -45,6 +53,8 @@ ANNOTATION_ROWS_FILE = "annotation_rows.parquet"
 ALLELE_VARIANTS_FILE = "allele_variants.parquet"
 ANNOTATION_VARIANTS_FILE = "annotation_variants.parquet"
 ANNOTATION_GENOTYPES_FILE = "annotation_genotypes.parquet"
+VARIANTS_FILE = "variants.parquet"
+HAPLOTYPES_FILE = "haplotypes.parquet"
 
 ANNOTATION_ROWS = """
 MATCH (a:Annotation)
@@ -144,6 +154,42 @@ RETURN a.id AS annotation_id, type(t) AS role, gt.name AS genotype,
 ORDER BY annotation_id, role, genotype
 """
 
+VARIANTS = """
+MATCH (v:Variant)
+CALL (v) {
+  OPTIONAL MATCH (v)-[:IN_GENE]->(g:Gene)
+  RETURN collect(g.symbol) AS dbsnp_genes
+}
+CALL (v) {
+  OPTIONAL MATCH (h:Haplotype)-[:HAS_VARIANT]->(v)
+  RETURN collect(h.gene) AS haplotype_genes
+}
+WITH v, dbsnp_genes, haplotype_genes
+UNWIND (CASE WHEN size(dbsnp_genes + haplotype_genes) = 0 THEN [null]
+             ELSE dbsnp_genes + haplotype_genes END) AS gene
+WITH v, gene ORDER BY gene
+WITH v, [x IN collect(DISTINCT gene) WHERE x IS NOT NULL] AS genes
+RETURN v.hgvs_g38 AS hgvs_g38, v.spdi_g38 AS spdi_g38, genes,
+       coalesce(v.rsids, []) AS rsids, coalesce(v.star_alleles, []) AS star_alleles,
+       coalesce(v.so_terms, []) AS so_terms, v.p_hgvs AS p_hgvs,
+       v.sources AS sources, v.run_id AS run_id
+ORDER BY hgvs_g38
+"""
+
+HAPLOTYPES = """
+MATCH (h:Haplotype)
+CALL (h) {
+  OPTIONAL MATCH (h)-[:HAS_VARIANT]->(v:Variant)
+  WITH v ORDER BY v.pos_g38, v.hgvs_g38
+  RETURN collect(v.hgvs_g38) AS variants
+}
+OPTIONAL MATCH (h)-[:SUBALLELE_OF]->(core:Haplotype)
+RETURN h.name AS name, h.gene AS gene, coalesce(h.is_reference, false) AS is_reference,
+       h.structure AS structure, h.hgvs_g38 AS hgvs_g38, h.hgvs_t2t AS hgvs_t2t,
+       variants, core.name AS suballele_of, h.sources AS sources, h.run_id AS run_id
+ORDER BY name
+"""
+
 DRUG_STRUCT = pl.Struct(
     {"name": pl.String, "cid": pl.Int64, "chembl_id": pl.String, "inchikey": pl.String}
 )
@@ -210,6 +256,29 @@ ANNOTATION_GENOTYPE_SCHEMA: dict[str, pl.DataType] = {
         pl.Struct({"hgvs_g38": pl.String, "copies": pl.Int64, "min_copies": pl.Int64})
     ),
 }
+VARIANT_SCHEMA: dict[str, pl.DataType] = {
+    "hgvs_g38": pl.String(),
+    "spdi_g38": pl.String(),
+    "genes": pl.List(pl.String),
+    "rsids": pl.List(pl.String),
+    "star_alleles": pl.List(pl.String),
+    "so_terms": pl.List(pl.String),
+    "p_hgvs": pl.String(),
+    "sources": pl.List(pl.String),
+    "run_id": pl.String(),
+}
+HAPLOTYPE_SCHEMA: dict[str, pl.DataType] = {
+    "name": pl.String(),
+    "gene": pl.String(),
+    "is_reference": pl.Boolean(),
+    "structure": pl.String(),
+    "hgvs_g38": pl.String(),
+    "hgvs_t2t": pl.String(),
+    "variants": pl.List(pl.String),
+    "suballele_of": pl.String(),
+    "sources": pl.List(pl.String),
+    "run_id": pl.String(),
+}
 
 
 def annotation_rows(
@@ -236,14 +305,24 @@ def annotation_genotypes(graph: KnowledgeGraph) -> pl.DataFrame:
     )
 
 
+def variants(graph: KnowledgeGraph) -> pl.DataFrame:
+    return pl.DataFrame(graph.run(VARIANTS), schema=VARIANT_SCHEMA)
+
+
+def haplotypes(graph: KnowledgeGraph) -> pl.DataFrame:
+    return pl.DataFrame(graph.run(HAPLOTYPES), schema=HAPLOTYPE_SCHEMA)
+
+
 def export_tables(graph: KnowledgeGraph, out_dir: Path) -> dict[str, int]:
-    """Write the four tables to ``out_dir``; returns rows per file."""
+    """Write the six tables to ``out_dir``; returns rows per file."""
     out_dir.mkdir(parents=True, exist_ok=True)
     tables = {
         ANNOTATION_ROWS_FILE: annotation_rows(graph),
         ALLELE_VARIANTS_FILE: allele_variants(graph),
         ANNOTATION_VARIANTS_FILE: annotation_variants(graph),
         ANNOTATION_GENOTYPES_FILE: annotation_genotypes(graph),
+        VARIANTS_FILE: variants(graph),
+        HAPLOTYPES_FILE: haplotypes(graph),
     }
     counts: dict[str, int] = {}
     for name, frame in tables.items():
@@ -263,9 +342,15 @@ __all__ = [
     "ANNOTATION_ROWS_FILE",
     "ANNOTATION_ROW_SCHEMA",
     "ANNOTATION_VARIANTS_FILE",
+    "HAPLOTYPES_FILE",
+    "HAPLOTYPE_SCHEMA",
+    "VARIANTS_FILE",
+    "VARIANT_SCHEMA",
     "allele_variants",
     "annotation_genotypes",
     "annotation_rows",
     "annotation_variants",
+    "haplotypes",
+    "variants",
     "export_tables",
 ]

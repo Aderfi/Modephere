@@ -541,6 +541,15 @@ def _add_refsnps(
             )
         for v in resolved.variants:
             vref = g.variant(v, stamp)
+            g.node(
+                "Variant",
+                variant_key(v),
+                {
+                    "so_terms": list(rec.so_terms) or None,
+                    "p_hgvs": rec.protein_hgvs.get(v.spdi),
+                },
+                stamp,
+            )
             g.rel(
                 "HAS_ALLELE",
                 current,

@@ -541,3 +541,20 @@ def test_every_unresolved_case_is_recorded(tmp_path):
         c for c in build.unresolved if c.subject == "CYP2D6*36" and c.annotation_id
     )
     assert (hybrid.annotation_id, hybrid.detail) == ("A_HYBRID", "TESTED='*36'")
+
+
+def test_variant_carries_dbsnp_consequences(tmp_path):
+    annotations = [
+        *ANNOTATIONS,
+        _ann("A_RS1065852", ["rs1065852"], alleles="A", comparison_alleles="G"),
+    ]
+    build = _build(tmp_path, annotations=annotations)
+    splice = node(build, "Variant", {"hgvs_g38": "NC_000022.11:g.42128945C>T"})
+    assert "splice_acceptor_variant" in splice.props["so_terms"]
+    assert "p_hgvs" not in splice.props  # dbSNP lists no protein change for it
+    # rs1065852: each alternative allele gets its own protein change
+    p34s = node(build, "Variant", {"hgvs_g38": "NC_000022.11:g.42130692G>A"})
+    p34a = node(build, "Variant", {"hgvs_g38": "NC_000022.11:g.42130692G>C"})
+    assert p34s.props["p_hgvs"] == "NP_000097.3:p.Pro34Ser"
+    assert p34a.props["p_hgvs"] == "NP_000097.3:p.Pro34Ala"
+    assert p34s.props["so_terms"] == ["missense_variant", "coding_sequence_variant"]
