@@ -20,8 +20,29 @@ Design decisions and their reasons are in [`PLAN.md`](PLAN.md).
 ```bash
 uv sync --extra dev            # chemistry + storage
 uv sync --extra ml --extra dev # + torch / PyG featurization (CUDA 13.2 wheels)
-uv sync --all-extras           # + ChEMBL salt-list standardizer
+uv sync --extra gpu --extra dev # + nvMolKit GPU conformers (else RDKit on CPU)
+uv sync --all-extras           # everything, incl. ChEMBL salt-list standardizer
 ```
+
+Extras: `ml` (torch + PyG), `gpu` (torch + nvMolKit), `kg` (neo4j), `pgx`
+(neo4j + openpyxl), `std` (ChEMBL structure pipeline), `viz` (matplotlib),
+`dev` (tests, linters, graphify).
+
+### As a wheel
+
+```bash
+uv build --wheel                       # -> dist/modephere-<version>-py3-none-any.whl
+pip install "dist/modephere-0.1.0-py3-none-any.whl[kg,pgx]"
+# torch for the ml / gpu extras comes from the PyTorch CUDA 13.2 index, which
+# [tool.uv.sources] only applies inside this repo:
+pip install "dist/modephere-0.1.0-py3-none-any.whl[gpu,ml]" \
+    --extra-index-url https://download.pytorch.org/whl/cu132
+```
+
+Installed, Modephere resolves `data/`, `logs/` and the other entries of
+`paths.toml` against the working directory (override with
+`MODEPHERE_PATHS__<NAME>`), and ingest runs record `code_version` as
+`modephere==<version>` rather than a git commit.
 
 ## Command line
 

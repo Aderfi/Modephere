@@ -864,26 +864,28 @@ name = "modephere"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "graphifyy" },
     { name = "httpx" },
     { name = "numpy" },
-    { name = "nvmolkit" },
-    { name = "openai" },
     { name = "polars" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "rdkit" },
     { name = "safetensors" },
-    { name = "torch" },
     { name = "tqdm" },
 ]
 
 [package.optional-dependencies]
 dev = [
+    { name = "graphifyy" },
     { name = "mypy" },
+    { name = "openai" },
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "ruff" },
+]
+gpu = [
+    { name = "nvmolkit" },
+    { name = "torch" },
 ]
 kg = [
     { name = "neo4j" },
@@ -907,15 +909,15 @@ viz = [
 [package.metadata]
 requires-dist = [
     { name = "chembl-structure-pipeline", marker = "extra == 'std'", specifier = ">=1.2.4" },
-    { name = "graphifyy", specifier = ">=0.9.103" },
+    { name = "graphifyy", marker = "extra == 'dev'", specifier = ">=0.9.103" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "matplotlib", marker = "extra == 'viz'", specifier = ">=3.10" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.18.0" },
     { name = "neo4j", marker = "extra == 'kg'", specifier = ">=6.0" },
     { name = "neo4j", marker = "extra == 'pgx'", specifier = ">=6.0" },
     { name = "numpy", specifier = ">=2.4" },
-    { name = "nvmolkit" },
-    { name = "openai", specifier = ">=3.46.0" },
+    { name = "nvmolkit", marker = "extra == 'gpu'" },
+    { name = "openai", marker = "extra == 'dev'", specifier = ">=3.46.0" },
     { name = "openpyxl", marker = "extra == 'pgx'", specifier = ">=3.1" },
     { name = "polars", specifier = ">=1.39" },
     { name = "pydantic", specifier = ">=2.12.5" },
@@ -926,12 +928,12 @@ requires-dist = [
     { name = "rdkit" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.14.0" },
     { name = "safetensors", specifier = ">=0.8" },
-    { name = "torch", specifier = "==2.12", index = "https://download.pytorch.org/whl/cu132" },
+    { name = "torch", marker = "extra == 'gpu'", specifier = "==2.12", index = "https://download.pytorch.org/whl/cu132" },
     { name = "torch", marker = "extra == 'ml'", specifier = "==2.12", index = "https://download.pytorch.org/whl/cu132" },
     { name = "torch-geometric", marker = "extra == 'ml'" },
     { name = "tqdm", specifier = ">=4.67" },
 ]
-provides-extras = ["ml", "dev", "std", "kg", "pgx", "viz"]
+provides-extras = ["ml", "gpu", "dev", "std", "kg", "pgx", "viz"]
 
 [[package]]
 name = "mpmath"

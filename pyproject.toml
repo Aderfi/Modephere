@@ -13,24 +13,28 @@ dependencies = [
     "httpx>=0.28.1",
     "safetensors>=0.8",
     "tqdm>=4.67",
-    "openai>=3.46.0",
-    "graphifyy>=0.9.103",
-    "nvmolkit",
-    "torch==2.12",
 ]
 
 [project.optional-dependencies]
-# torch / PyG are only needed by modephere.types.tensors and (later) featurize/.
+# torch / PyG are only needed by modephere.types.tensors and featurize/.
 ml = [
     "torch==2.12",
     "torch-geometric",
     "pyg_lib",
+]
+# GPU conformer backend (library/conformers.py); without it the RDKit CPU
+# backend is used. Brings torch + CUDA, so it is not a base dependency.
+gpu = [
+    "torch==2.12",
+    "nvmolkit",
 ]
 dev = [
     "pytest>=8.0.0",
     "pytest-cov>=6.0.0",
     "ruff>=0.14.0",
     "mypy>=1.18.0",
+    "graphifyy>=0.9.103",  # code-graph tooling (graphify-out/), not imported
+    "openai>=3.46.0",      # used by graphify, not by modephere
 ]
 std = [
     "chembl-structure-pipeline>=1.2.4",

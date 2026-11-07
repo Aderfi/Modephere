@@ -18,13 +18,10 @@ import logging
 import subprocess
 import uuid
 from datetime import UTC, datetime
-from importlib.metadata import version
-from typing import TYPE_CHECKING
+from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -119,8 +116,32 @@ class Stamp(BaseModel):
         return out
 
 
+def _release() -> tuple[str, bool]:
+    """``("modephere==0.1.0", False)``: an installed build is a fixed version."""
+    try:
+        return f"modephere=={version('modephere')}", False
+    except PackageNotFoundError:
+        return "unknown", True
+
+
+def _is_checkout(repo: Path) -> bool:
+    """The running modephere code is ``repo``'s own source tree."""
+    import modephere  # noqa: PLC0415 -- the package is fully loaded by now
+
+    package = Path(modephere.__file__).resolve().parent
+    return package.is_relative_to(repo.resolve())
+
+
 def code_version(repo: Path) -> tuple[str, bool]:
-    """``(commit sha, dirty)`` of ``repo``; ``("unknown", True)`` outside git."""
+    """``(commit sha, dirty)`` of ``repo`` when modephere runs from that checkout.
+
+    An installed wheel is identified by its release (``modephere==X.Y.Z``,
+    clean) instead: the working directory, or any git repository around it,
+    says nothing about the code that ran. ``("unknown", True)`` when git fails
+    on a checkout or no version is known.
+    """
+    if not _is_checkout(repo):
+        return _release()
     try:
         sha = subprocess.run(
             ["git", "-C", str(repo), "rev-parse", "HEAD"],

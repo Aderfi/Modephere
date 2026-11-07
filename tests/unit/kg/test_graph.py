@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from importlib.metadata import version
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from modephere.config import PROJECT_ROOT
 from modephere.core import ConfigurationError, ResourceError
-from modephere.kg import KnowledgeGraph, RelSpec, load_chembl
+from modephere.kg import KnowledgeGraph, RelSpec, load_chembl, provenance
 from modephere.kg.graph import _lucene_escape, batched, node_query
 from modephere.kg.provenance import Dataset, IngestRun, Stamp, code_version
 
@@ -122,7 +124,23 @@ def test_lucene_escape() -> None:
     assert _lucene_escape("a+b (c)") == "a\\+b \\(c\\)"
 
 
-def test_code_version_outside_git(tmp_path: Path) -> None:
+def test_code_version_of_an_installed_build_is_its_release(tmp_path: Path) -> None:
+    # modephere's code does not live under tmp_path, even if tmp_path were a
+    # git repository: the run is the installed release, not that repo's commit
+    sha, dirty = code_version(tmp_path)
+    assert sha == f"modephere=={version('modephere')}"
+    assert dirty is False
+
+
+def test_code_version_of_the_checkout_is_its_commit() -> None:
+    sha, _ = code_version(PROJECT_ROOT)
+    assert len(sha) == 40 and int(sha, 16) >= 0
+
+
+def test_code_version_when_git_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(provenance, "_is_checkout", lambda _repo: True)
     assert code_version(tmp_path) == ("unknown", True)
 
 
