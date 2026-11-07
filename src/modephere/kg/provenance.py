@@ -117,7 +117,7 @@ class Stamp(BaseModel):
 
 
 def _release() -> tuple[str, bool]:
-    """``("modephere==0.1.0", False)``: an installed build is a fixed version."""
+    """``("modephere==X.Y.Z", False)``: an installed build is a fixed version."""
     try:
         return f"modephere=={version('modephere')}", False
     except PackageNotFoundError:

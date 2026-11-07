@@ -861,7 +861,7 @@ wheels = [
 
 [[package]]
 name = "modephere"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
@@ -875,6 +875,16 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+all = [
+    { name = "chembl-structure-pipeline" },
+    { name = "matplotlib" },
+    { name = "neo4j" },
+    { name = "nvmolkit" },
+    { name = "openpyxl" },
+    { name = "pyg-lib" },
+    { name = "torch" },
+    { name = "torch-geometric" },
+]
 dev = [
     { name = "graphifyy" },
     { name = "mypy" },
@@ -912,6 +922,7 @@ requires-dist = [
     { name = "graphifyy", marker = "extra == 'dev'", specifier = ">=0.9.103" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "matplotlib", marker = "extra == 'viz'", specifier = ">=3.10" },
+    { name = "modephere", extras = ["ml", "gpu", "kg", "pgx", "std", "viz"], marker = "extra == 'all'" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.18.0" },
     { name = "neo4j", marker = "extra == 'kg'", specifier = ">=6.0" },
     { name = "neo4j", marker = "extra == 'pgx'", specifier = ">=6.0" },
@@ -928,12 +939,12 @@ requires-dist = [
     { name = "rdkit" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.14.0" },
     { name = "safetensors", specifier = ">=0.8" },
-    { name = "torch", marker = "extra == 'gpu'", specifier = "==2.12", index = "https://download.pytorch.org/whl/cu132" },
-    { name = "torch", marker = "extra == 'ml'", specifier = "==2.12", index = "https://download.pytorch.org/whl/cu132" },
+    { name = "torch", marker = "extra == 'gpu'", specifier = ">=2.12,<2.13", index = "https://download.pytorch.org/whl/cu132" },
+    { name = "torch", marker = "extra == 'ml'", specifier = ">=2.12,<2.13", index = "https://download.pytorch.org/whl/cu132" },
     { name = "torch-geometric", marker = "extra == 'ml'" },
     { name = "tqdm", specifier = ">=4.67" },
 ]
-provides-extras = ["ml", "gpu", "dev", "std", "kg", "pgx", "viz"]
+provides-extras = ["ml", "gpu", "dev", "std", "kg", "pgx", "viz", "all"]
 
 [[package]]
 name = "mpmath"
@@ -1512,11 +1523,12 @@ wheels = [
 
 [[package]]
 name = "pyg-lib"
-version = "0.7.0+pt212cu132"
+version = "0.9.0+pt212cu132"
 source = { registry = "https://data.pyg.org/whl/torch-2.12.0+cu132.html" }
 wheels = [
-    { url = "https://data.pyg.org/whl/torch-2.12.0%2Bcu132/pyg_lib-0.7.0%2Bpt212cu132-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl" },
-    { url = "https://data.pyg.org/whl/torch-2.12.0%2Bcu132/pyg_lib-0.7.0%2Bpt212cu132-cp314-cp314-win_amd64.whl" },
+    { url = "https://data.pyg.org/whl/torch-2.12.0%2Bcu132/pyg_lib-0.9.0%2Bpt212cu132-cp310-abi3-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl" },
+    { url = "https://data.pyg.org/whl/torch-2.12.0%2Bcu132/pyg_lib-0.9.0%2Bpt212cu132-cp310-abi3-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl" },
+    { url = "https://data.pyg.org/whl/torch-2.12.0%2Bcu132/pyg_lib-0.9.0%2Bpt212cu132-cp310-abi3-win_amd64.whl" },
 ]
 
 [[package]]

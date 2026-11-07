@@ -1,6 +1,6 @@
 [project]
 name = "modephere"
-version = "0.1.0"
+version = "0.1.1"
 description = "Molecule and 2D/3D pharmacophore representations from SMILES, PubChem CIDs or drug names."
 readme = "README.md"
 requires-python = ">=3.14,<3.15"
@@ -18,14 +18,14 @@ dependencies = [
 [project.optional-dependencies]
 # torch / PyG are only needed by modephere.types.tensors and featurize/.
 ml = [
-    "torch==2.12",
+    "torch>=2.12,<2.13",
     "torch-geometric",
-    "pyg_lib",
+    "pyg_lib",  # radius_graph, used by the SchNet / ViSNet featurizers
 ]
 # GPU conformer backend (library/conformers.py); without it the RDKit CPU
 # backend is used. Brings torch + CUDA, so it is not a base dependency.
 gpu = [
-    "torch==2.12",
+    "torch>=2.12,<2.13",
     "nvmolkit",
 ]
 dev = [
@@ -50,6 +50,10 @@ pgx = [
 ]
 viz = [
     "matplotlib>=3.10",
+]
+# Every runtime extra (not dev): pip / uv install "modephere[all]".
+all = [
+    "modephere[ml,gpu,kg,pgx,std,viz]",
 ]
 
 [project.scripts]

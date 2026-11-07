@@ -26,18 +26,50 @@ uv sync --all-extras           # everything, incl. ChEMBL salt-list standardizer
 
 Extras: `ml` (torch + PyG), `gpu` (torch + nvMolKit), `kg` (neo4j), `pgx`
 (neo4j + openpyxl), `std` (ChEMBL structure pipeline), `viz` (matplotlib),
-`dev` (tests, linters, graphify).
+`all` (every one of those), `dev` (tests, linters, graphify).
 
 ### As a wheel
 
+Each GitHub release carries the wheel. From another uv project:
+
 ```bash
-uv build --wheel                       # -> dist/modephere-<version>-py3-none-any.whl
-pip install "dist/modephere-0.1.0-py3-none-any.whl[kg,pgx]"
-# torch for the ml / gpu extras comes from the PyTorch CUDA 13.2 index, which
-# [tool.uv.sources] only applies inside this repo:
-pip install "dist/modephere-0.1.0-py3-none-any.whl[gpu,ml]" \
-    --extra-index-url https://download.pytorch.org/whl/cu132
+uv add "modephere[all] @ https://github.com/Aderfi/Modephere/releases/download/v0.1.1/modephere-0.1.1-py3-none-any.whl"
 ```
+
+`[tool.uv.sources]` is not part of the wheel, and uv applies a project's
+sources only to its direct dependencies. So the project that adds
+`modephere[all]` (or `[ml]`) lists `torch` and `pyg_lib` itself and routes
+them: `pyg_lib` is only on the PyG index, and torch should come from the
+CUDA 13.2 index (from PyPI otherwise). In its `pyproject.toml`:
+
+```toml
+[project]
+dependencies = [
+    "torch>=2.12,<2.13",
+    "pyg_lib",
+    "modephere[all]",
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu132"
+url = "https://download.pytorch.org/whl/cu132"
+explicit = true
+
+[[tool.uv.index]]
+name = "pyg"
+url = "https://data.pyg.org/whl/torch-2.12.0+cu132.html"
+format = "flat"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu132" }
+pyg_lib = { index = "pyg" }
+modephere = { url = "https://github.com/Aderfi/Modephere/releases/download/v0.1.1/modephere-0.1.1-py3-none-any.whl" }
+```
+
+With pip: `--extra-index-url https://download.pytorch.org/whl/cu132
+--find-links https://data.pyg.org/whl/torch-2.12.0+cu132.html`.
+To build the wheel locally: `uv build --wheel` (→ `dist/`).
 
 Installed, Modephere resolves `data/`, `logs/` and the other entries of
 `paths.toml` against the working directory (override with
