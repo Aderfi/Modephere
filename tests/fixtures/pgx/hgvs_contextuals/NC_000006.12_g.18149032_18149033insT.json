@@ -1,0 +1,19 @@
+{
+ "data": {
+  "input_hgvs_validity": "invalid",
+  "spdis": [
+   {
+    "deleted_sequence": "TT",
+    "inserted_sequence": "TTT",
+    "position": 18149032,
+    "seq_id": "NC_000006.12"
+   }
+  ],
+  "warnings": [
+   {
+    "message": "We detected that this HGVS could be represented with a more 3' location. Technically this does not conform to the HGVS standard. (See for example https://varnomen.hgvs.org/bg-material/numbering/) We do not require this for our processing so we ignored it. Note: we have not implemented the exon/exon exception to the 3' rule, so this warning could be in error.",
+    "reason": "Other"
+   }
+  ]
+ }
+}

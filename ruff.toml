@@ -71,6 +71,7 @@ dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 "src/modephere/library/config.py" = ["TC001", "TC002", "TC003"]
 "src/modephere/library/standardize.py" = ["TC001", "TC002", "TC003"]
 "src/modephere/library/ingest/pubchem.py" = ["TC001", "TC002", "TC003"]
+"src/modephere/pgx/**/*.py" = ["TC001", "TC002", "TC003"]
 "tests/**/*.py" = ["PLR2004", "S101"]
 
 [format]

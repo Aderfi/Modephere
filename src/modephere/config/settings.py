@@ -52,8 +52,9 @@ class Paths(BaseModel):
     library: Path = Path("data/library")
     cache: Path = Path("data/cache")
     chembl: Path = Path("data/chembl")
+    pgx: Path = Path("data/pgx")
 
-    @field_validator("data", "logs", "library", "cache", "chembl")
+    @field_validator("data", "logs", "library", "cache", "chembl", "pgx")
     @classmethod
     def _absolute(cls, v: Path) -> Path:
         return v if v.is_absolute() else PROJECT_ROOT / v
@@ -107,6 +108,19 @@ class KGSettings(BaseModel):
     batch_size: PositiveInt = 1000
 
 
+class NCBISettings(BaseModel):
+    """NCBI E-utilities / Variation Services client identity (``modephere.pgx``).
+
+    ``MODEPHERE_NCBI__API_KEY`` raises the E-utilities limit from 3 to 10
+    requests/s; ``MODEPHERE_NCBI__EMAIL`` is sent only when set.
+    """
+
+    api_key: SecretStr | None = None
+    email: str | None = None
+    tool: str = "modephere"
+    timeout_s: PositiveFloat = 30.0
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="MODEPHERE_",
@@ -122,6 +136,7 @@ class Settings(BaseSettings):
     pubchem: PubChemSettings = Field(default_factory=PubChemSettings)
     chembl: ChemblSettings = Field(default_factory=ChemblSettings)
     kg: KGSettings = Field(default_factory=KGSettings)
+    ncbi: NCBISettings = Field(default_factory=NCBISettings)
 
     @classmethod
     def settings_customise_sources(
@@ -145,6 +160,7 @@ __all__ = [
     "PROJECT_ROOT",
     "ChemblSettings",
     "KGSettings",
+    "NCBISettings",
     "Paths",
     "PubChemSettings",
     "Settings",

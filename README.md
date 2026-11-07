@@ -100,6 +100,55 @@ labels = bioactivity_labels(staging, ["CHEMBL1862"], library=Path("data/library"
 The SQLite path is `[chembl] sqlite` in `settings.toml` (`MODEPHERE_CHEMBL__SQLITE`). Graph
 model: `src/modephere/kg/schema.py`; selection and aggregation rules: `PLAN.md` section F.
 
+## Pharmacogenomic layer
+
+`modephere.pgx` (ported from dev_Pgen's `src.kg`) merges PharmGKB variant annotations,
+their allele labels (rsIDs, star alleles) and the canonical GRCh38 variants behind them
+(PharmVar / ClinPGx *cis* sets; every dbSNP alternative of an rsID) into the same Neo4j.
+The layers meet at `Gene` (HGNC symbol) and `Drug` (`SAME_AS` a ChEMBL `Compound`);
+model in `src/modephere/kg/schema.py`.
+
+- A variant is its GRCh38 genomic HGVS, `Variant {hgvs_g38: "NC_000010.11:g.94781859G>A"}`
+  (from the NCBI-canonical SPDI, kept as `spdi_g38`); rsIDs and star alleles are
+  metadata on it (`rsids`, `star_alleles`). Assembly-specific properties carry the
+  assembly suffix, so `hgvs_g37` / `hgvs_t2t` can be added beside them later.
+- A star allele is a `Haplotype` with `HAS_VARIANT` to each mutation it groups and
+  its cis set as `hgvs_g38` (`NC_000010.11:g.[94775367A>G;94781859G>A;94842866A>G]`).
+- Outcomes that depend on two alleles keep them: `(:Annotation)-[:TESTED|COMPARED_TO]->
+  (:Genotype {name: "CYP2C19*1/*2"})-[:HAS_COPY {copies}]->(:Haplotype)`, or
+  `->(:Variant)` for a site genotype (`rs4244285:A/G`, `ref_copies: 1`). Genotype HGVS
+  is diploid (`g.[…];[=]`); `copies` is exact or null (carrier-only report, `xN`),
+  `min_copies` the lower bound, and `gene_copies` / `gene_copies_min` count gene copies.
+- Structural alleles: whole-gene deletions (`CYP2D6*5`, `CYP2A6*4`, `GSTM1*0` behind
+  `GSTM1 null`) are `Haplotype {structure: "gene_deletion"}` with HGVS over the NCBI Gene
+  span (`g.(?_start)_(end_?)del`, plus `hgvs_t2t` where T2T-CHM13 places the gene, e.g.
+  GSTT1, absent from GRCh38's primary assembly); `*2xN` counts copies of `*2`; HLA alleles
+  are `Haplotype {structure: "hla_typed"}` named by IPD-IMGT/HLA (no HGVS). CYP2D6-2D7 /
+  CYP2A6-2A7 hybrids stay unresolved. Links read on PharmGKB's forward-strand convention
+  where the strand cannot be proven carry `strand_assumed: true`.
+
+```bash
+uv sync --extra pgx                              # neo4j + openpyxl
+uv run python -m modephere.pgx fetch             # only networked step: dbSNP, NCBI SPDI, ClinPGx
+uv run python -m modephere.pgx ingest            # offline build -> Neo4j, provenance audit
+uv run python -m modephere.pgx ingest --replace  # rebuild the layer; ChEMBL data untouched
+uv run python -m modephere.kg link-drugs         # Drug -[:SAME_AS]-> Compound
+uv run python -m modephere.kg link-library       # LibraryCompound -[:REPRESENTS]-> Compound
+uv run python -m modephere.pgx export            # -> data/pgx/export/*.parquet
+```
+
+Inputs live under `data/pgx/` (`pharmgkb/var_*_ann.tsv`, `pharmvar/<GENE>/`,
+`drugs/`), raw responses under `data/cache/{ncbi,clinpgx}/` (same format as dev_Pgen's
+`data/library/kg/raw/`); see `modephere.pgx.inputs`. Every pgx run is an
+`:IngestRun {layer: "pgx"}`, so `--replace` withdraws only its datasets. Each ingest rewrites
+`data/pgx/reports/unresolved.log`: one line per unresolved case
+(`<category> | <reason> | <subject> | annotation=<id> | <raw notation>`), next to
+`resolution_report.tsv` and `disagreements.tsv`. `export` writes
+`annotation_rows.parquet` (each drug as `{name, cid, chembl_id, inchikey}`, the InChIKey
+naming its `compounds/<InChIKey>.safetensors`), `allele_variants.parquet`,
+`annotation_variants.parquet` and `annotation_genotypes.parquet` (each tested / compared
+genotype with its per-variant dosage, star alleles expanded into their mutations).
+
 ## Library layout
 
 ```

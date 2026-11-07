@@ -29,9 +29,13 @@ class CacheEntry(BaseModel):
 
     key: str
     request: str = Field(..., description="Request URL (+ body), never secrets.")
-    status: Literal["ok", "not_found"]
+    status: Literal["ok", "not_found", "error"]
     retrieved_at: AwareDatetime
     response: dict[str, Any] | None = None
+    warnings: list[str] = Field(default_factory=list)
+    source_version: str | None = Field(
+        default=None, description="Upstream release, e.g. the dbSNP build."
+    )
 
 
 class RawCache:
@@ -98,6 +102,9 @@ class RawCache:
 
     def keys(self) -> set[str]:
         return set(self._entries)
+
+    def entries(self) -> list[CacheEntry]:
+        return list(self._entries.values())
 
     def sha256(self) -> str:
         """Checksum of the cache file on disk (of an empty file if absent)."""

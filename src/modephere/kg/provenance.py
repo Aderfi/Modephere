@@ -63,9 +63,20 @@ class IngestRun(BaseModel):
     dirty: bool
     tool: str = Field(default_factory=lambda: f"modephere {version('modephere')}")
     params: dict[str, str] = Field(default_factory=dict)
+    layer: str | None = Field(
+        default=None,
+        description="Graph layer the run writes (e.g. 'pgx'), so a layer can be "
+        "rebuilt without touching the others.",
+    )
 
     @classmethod
-    def start(cls, params: dict[str, str], repo: Path | None = None) -> IngestRun:
+    def start(
+        cls,
+        params: dict[str, str],
+        repo: Path | None = None,
+        *,
+        layer: str | None = None,
+    ) -> IngestRun:
         sha, dirty = code_version(repo) if repo is not None else ("unknown", True)
         return cls(
             id=uuid.uuid4().hex,
@@ -73,6 +84,7 @@ class IngestRun(BaseModel):
             code_version=sha,
             dirty=dirty,
             params=dict(params),
+            layer=layer,
         )
 
     def props(self) -> dict[str, object]:
@@ -84,6 +96,7 @@ class IngestRun(BaseModel):
             "code_version": self.code_version,
             "dirty": self.dirty,
             "tool": self.tool,
+            "layer": self.layer,
             # Neo4j properties cannot be maps: the parameters travel as JSON.
             "params": json.dumps(self.params, sort_keys=True),
         }

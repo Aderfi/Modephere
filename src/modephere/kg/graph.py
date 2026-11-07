@@ -238,6 +238,40 @@ class KnowledgeGraph:
             rprops=run.props(),
         )
 
+    def record_datasets(self, datasets: Sequence[Dataset], run: IngestRun) -> None:
+        """Provenance of a run over several datasets: every ``:Dataset``, the
+        ``:IngestRun`` (its ``sources`` are all of them) and one ``USED`` each.
+
+        Unlike repeated :meth:`record_run` calls, the run keeps every dataset in
+        ``sources``, so :meth:`remove_source` deletes it only with the last one.
+        """
+        ids = [d.id for d in datasets]
+        self.run(
+            "UNWIND $datasets AS ds "
+            "MERGE (d:Dataset {id: ds.id}) SET d += ds.props, "
+            "d.sources = [ds.id], d.run_id = $run",
+            datasets=[{"id": d.id, "props": d.props()} for d in datasets],
+            run=run.id,
+        )
+        self.run(
+            "MERGE (r:IngestRun {id: $run}) SET r += $rprops, "
+            "r.sources = $ids, r.run_id = $run "
+            "WITH r UNWIND $ids AS id MATCH (d:Dataset {id: id}) "
+            "MERGE (r)-[u:USED]->(d) SET u.sources = [id], u.run_id = $run",
+            run=run.id,
+            rprops=run.props(),
+            ids=ids,
+        )
+
+    def layer_runs(self, layer: str) -> list[Row]:
+        """``{id, datasets}`` of every ``:IngestRun`` of ``layer``."""
+        return self.run(
+            "MATCH (r:IngestRun {layer: $layer}) "
+            "OPTIONAL MATCH (r)-[:USED]->(d:Dataset) "
+            "RETURN r.id AS id, collect(d.id) AS datasets ORDER BY id",
+            layer=layer,
+        )
+
     def remove_source(self, dataset_id: str) -> Row:
         """Withdraw one dataset from the graph.
 

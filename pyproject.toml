@@ -39,6 +39,11 @@ std = [
 kg = [
     "neo4j>=6.0",
 ]
+# Pharmacogenomic layer (modephere.pgx): ClinPGx allele tables are .xlsx.
+pgx = [
+    "neo4j>=6.0",
+    "openpyxl>=3.1",
+]
 viz = [
     "matplotlib>=3.10",
 ]

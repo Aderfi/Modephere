@@ -1,0 +1,13 @@
+{
+ "data": {
+  "input_hgvs_validity": "valid",
+  "spdis": [
+   {
+    "deleted_sequence": "AAGT",
+    "inserted_sequence": "",
+    "position": 18149103,
+    "seq_id": "NC_000006.12"
+   }
+  ]
+ }
+}
